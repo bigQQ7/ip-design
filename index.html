@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>IP造型诊断台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=ZCOOL+QingKe+HuangYou&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- 登录 -->
+<main id="screen-login" class="auth" hidden>
+  <div class="auth-card">
+    <h1>IP造型诊断台</h1>
+    <p class="sub">仅限受邀成员使用</p>
+    <form id="loginForm" autocomplete="on">
+      <label class="field" for="loginId">用户名或邮箱<input id="loginId" autocomplete="username" required></label>
+      <label class="field" for="loginPw">密码<input id="loginPw" type="password" autocomplete="current-password" required></label>
+      <p class="err" id="loginErr" hidden></p>
+      <button class="btn wide" type="submit" id="loginBtn">登录</button>
+    </form>
+    <button class="link" type="button" id="forgotBtn">忘记密码？</button>
+    <form id="forgotForm" hidden>
+      <label class="field" for="forgotEmail">注册时用的邮箱<input id="forgotEmail" type="email" required></label>
+      <p class="note" id="forgotMsg" hidden></p>
+      <button class="btn ghost wide" type="submit">发送重设密码邮件</button>
+    </form>
+    <p class="note">收到邀请邮件的同学，请点击邮件里的链接进入并设置密码。</p>
+  </div>
+</main>
+
+<!-- 设置密码 -->
+<main id="screen-setpw" class="auth" hidden>
+  <div class="auth-card">
+    <h1>设置密码</h1>
+    <p class="sub" id="setpwWho"></p>
+    <form id="setpwForm">
+      <label class="field" for="newPw">新密码（至少 8 位）<input id="newPw" type="password" autocomplete="new-password" minlength="8" required></label>
+      <label class="field" for="newPw2">再输入一次<input id="newPw2" type="password" autocomplete="new-password" minlength="8" required></label>
+      <p class="err" id="setpwErr" hidden></p>
+      <button class="btn wide" type="submit">保存并进入</button>
+    </form>
+  </div>
+</main>
+
+<!-- 配置缺失 -->
+<main id="screen-config" class="auth" hidden>
+  <div class="auth-card">
+    <h1>还差一步配置</h1>
+    <p>请在 <code>config.js</code> 里填好 Supabase 的项目地址和 anon key，具体步骤见仓库里的 README。</p>
+  </div>
+</main>
+
+<!-- 主程序 -->
+<div id="screen-app" class="wrap" hidden>
+  <header>
+    <div>
+      <h1>IP造型诊断台</h1>
+      <p class="sub" id="whoami"></p>
+    </div>
+    <div class="head-right">
+      <nav role="tablist" aria-label="视图">
+        <button role="tab" id="tab-check" aria-selected="true">造型自查</button>
+        <button role="tab" id="tab-lib" aria-selected="false">达标案例库</button>
+        <button role="tab" id="tab-sub" aria-selected="false">推荐案例</button>
+        <button role="tab" id="tab-review" aria-selected="false" hidden>审核<span id="pendCount"></span></button>
+        <button role="tab" id="tab-members" aria-selected="false" hidden>成员</button>
+      </nav>
+      <button class="link" id="logoutBtn" type="button">退出登录</button>
+    </div>
+  </header>
+
+  <!-- 造型自查 -->
+  <section id="view-check" class="grid">
+    <div class="panel">
+      <div class="drop" id="drop" tabindex="0" role="button" aria-label="上传造型图">
+        <img id="preview" alt="待自查的造型图" hidden>
+        <div class="hint" id="dropHint">点击、拖入或直接粘贴一张造型图<br>图片只在你的浏览器里显示，不会上传</div>
+      </div>
+      <input type="file" id="file" accept="image/*" hidden>
+      <label class="field" for="selfSpecies">它是什么物种？（可选，用来推荐同类案例）
+        <input id="selfSpecies" placeholder="例如：兔、猫、小怪兽">
+      </label>
+    </div>
+    <div class="panel">
+      <p class="lead">对照图片，逐条勾选<strong>已经做到</strong>的项，然后点下面的按钮看结果。</p>
+      <div id="checklist"></div>
+      <div class="row"><button class="btn" id="checkRun" type="button">看自查结果</button><button class="btn ghost" id="checkReset" type="button">清空勾选</button></div>
+      <div id="checkResult" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <!-- 案例库 -->
+  <section id="view-lib" hidden>
+    <div class="panel">
+      <div class="lib-tools">
+        <input type="search" id="q" placeholder="搜索名字、物种、特征，如：兔、耳朵、帽子">
+        <span class="count" id="libCount"></span>
+      </div>
+      <div class="filters" id="filters"></div>
+      <div class="addbox" id="addWrap" hidden>
+        <div class="row" style="margin-top:0;align-items:center">
+          <button class="btn" id="bulkOpen" type="button">上传达标案例（可多选）</button>
+          <span class="note" style="margin:0">也可以在这一页直接粘贴图片。上传后进入「未分类」，点开案例手动分类。</span>
+        </div>
+        <input type="file" id="bulkFile" accept="image/*" multiple hidden>
+        <ul class="prog" id="bulkProg"></ul>
+      </div>
+    </div>
+    <div class="cards" id="libCards"></div>
+  </section>
+
+  <!-- 推荐 -->
+  <section id="view-sub" hidden>
+    <div class="grid">
+      <div class="panel">
+        <h2 class="h-first">推荐好看的 IP</h2>
+        <p class="note" style="margin-top:0">可以一次选多张。老师审核通过后，会进入达标案例库给大家做参考。</p>
+        <div class="drop small" id="subDrop" tabindex="0" role="button" aria-label="上传推荐的造型图，可多选">
+          <div class="hint" id="subHint">点击、拖入或直接粘贴图片，可以一次多张<br>正面、全身、清晰最好</div>
+        </div>
+        <input type="file" id="subFile" accept="image/*" multiple hidden>
+        <div id="subPicked" class="picked"></div>
+        <label class="field" for="subNote">统一推荐理由（可不填，单张没写理由时用这条）
+          <textarea id="subNote" rows="2" placeholder="例如：耳朵和帽子融成一体，剪影一眼就能认出"></textarea>
+        </label>
+        <label class="field" for="subSrc">作品名称或出处（可选）<input id="subSrc" placeholder="例如：小红书 @某某工作室"></label>
+        <p class="err" id="subErr" hidden></p>
+        <div class="row"><button class="btn" id="subSend" type="button">提交推荐</button></div>
+      </div>
+      <div class="panel">
+        <h2 class="h-first">我的推荐</h2>
+        <div id="mySubs"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 审核 -->
+  <section id="view-review" hidden>
+    <div class="panel">
+      <div class="lib-tools">
+        <h2 class="h-first" style="margin:0">学生推荐审核</h2>
+        <div class="chips" id="revFilter">
+          <button class="chip" type="button" data-st="pending" aria-pressed="true">待审核</button>
+          <button class="chip" type="button" data-st="approved" aria-pressed="false">已收录</button>
+          <button class="chip" type="button" data-st="rejected" aria-pressed="false">未通过</button>
+        </div>
+      </div>
+      <div id="bulkBar" class="bulkbar" hidden>
+        <label class="inline" for="selAll"><input type="checkbox" id="selAll"> 全选 <span class="note" id="selInfo"></span></label>
+        <div class="row" style="margin-top:0">
+          <button class="btn small" id="bulkOk" type="button">一键通过</button>
+          <input id="bulkReason" class="inp" placeholder="批量不通过的原因（学生能看到，可不填）">
+          <button class="btn ghost small" id="bulkNo" type="button">一键不通过</button>
+        </div>
+        <p class="note" id="bulkMsg" aria-live="polite"></p>
+      </div>
+    </div>
+    <div id="revList" class="revlist"></div>
+  </section>
+
+  <!-- 成员 -->
+  <section id="view-members" hidden>
+    <div class="grid">
+      <div class="panel">
+        <h2 class="h-first">邀请成员</h2>
+        <p class="note" style="margin-top:0">每行一个邮箱。对方会收到一封邮件，点链接进入后设置自己的密码。</p>
+        <label class="field" for="inviteEmails">邮箱<textarea id="inviteEmails" rows="5" placeholder="student1@qq.com&#10;student2@163.com"></textarea></label>
+        <div class="row"><button class="btn" id="inviteSend" type="button">发送邀请</button></div>
+        <ul class="prog" id="inviteProg"></ul>
+      </div>
+      <div class="panel">
+        <h2 class="h-first">成员列表</h2>
+        <div id="memberList"></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<dialog id="dlg"><div class="dlg" id="dlgBody"></div><div class="dlg-foot"><button class="btn ghost" id="dlgClose" type="button">关闭</button></div></dialog>
+
+<dialog id="tagDlg">
+  <form id="tagForm" class="tagform">
+    <h2 class="h-first" id="tagTitle">分类与标签</h2>
+    <div id="tagPreview"></div>
+    <label class="field" for="a-name">名字<input id="a-name" required></label>
+    <div class="two">
+      <label class="field" for="a-species">物种<input id="a-species" placeholder="兔、猫、小怪兽…"></label>
+      <label class="field" for="a-feature_cat">主特征分类<select id="a-feature_cat"></select></label>
+    </div>
+    <fieldset class="field hl-set" id="a-highlights"><legend>亮点（可多选）</legend></fieldset>
+    <div class="two">
+      <label class="field" for="a-style">风格<select id="a-style"></select></label>
+      <label class="field" for="a-mood">表情<input id="a-mood" placeholder="不屑、犯困、开心…"></label>
+    </div>
+    <label class="field" for="a-feature">主特征（具体描述）<input id="a-feature" placeholder="超大圆耳、黄色蘑菇帽…"></label>
+    <label class="field" for="a-fusion">跨界元素<input id="a-fusion" placeholder="葡萄、高压锅；没有写 无"></label>
+    <label class="field" for="a-colors">配色<input id="a-colors" placeholder="灰白主色+橙红围巾点缀"></label>
+    <label class="field" for="a-learn">借鉴点<textarea id="a-learn" rows="2"></textarea></label>
+    <p class="err" id="tagErr" hidden></p>
+    <div class="row end">
+      <button class="btn ghost" id="tagCancel" type="button">取消</button>
+      <button class="btn" id="tagSave" type="submit">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

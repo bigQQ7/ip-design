@@ -1,0 +1,594 @@
+/* IP造型诊断台 —— 静态前端 + Supabase（登录、数据库、图片存储） */
+"use strict";
+
+const CFG = window.APP_CONFIG || {};
+const $ = s => document.querySelector(s);
+const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+const SITE_URL = location.origin + location.pathname;
+const SCREENS = ["login", "setpw", "config", "app"];
+function screen(name){ SCREENS.forEach(s => $("#screen-" + s).hidden = s !== name); }
+function showErr(node, msg){ node.textContent = msg; node.hidden = !msg; }
+
+const HIGHLIGHTS = ["五官表情", "剪影", "融合创意", "配色", "比例体型"];
+const FEATURE_CATS = ["耳朵", "头型", "帽子/头饰", "头顶元素", "尾巴", "嘴", "角", "表情", "体型", "发型"];
+const STYLES = ["3D软胶", "2D平面", "娃系", "3D软胶/2D"];
+
+/* ---------------- 五层自查清单 ---------------- */
+const LAYERS = [
+  { n: 1, t: "一票否决：看着难不难受", items: [
+    { q: "缩小和放大看，轮廓都不让人难受（没有一圈小鼓包、肿胀形、突兀凸起）", fix: "把轮廓上的鼓包合并成 3 到 5 个大团，左右对称或一大几小；删掉突兀的凸起。", hl: "剪影" },
+    { q: "头大身小，重心在下，站得稳", fix: "头放大或身体缩短，头身比控制在 1:1 到 1:1.5，腿改短粗、脚放宽。", hl: "比例体型" },
+    { q: "眼睛没有被头发或配件遮住", fix: "露出眼睛；坚持遮挡的话，用嘴型、腮和身体姿态把情绪补回来。", hl: "五官表情" } ] },
+  { n: 2, t: "识别：能不能一眼认出、说清楚", items: [
+    { q: "能用「一只____的____」说出它是什么", fix: "先定物种，再定一个跨界元素，写成「一只____的____」。", hl: "融合创意" },
+    { q: "涂黑之后，正面和背面都认得出", fix: "把主特征放大到剪影级别，让背面也能看到它。", hl: "剪影" },
+    { q: "物种特征是剪影里最大的形，而且只有一个主角", fix: "保留一个主特征并放大，另一个缩小或删掉；不要把物种特征关在面窗里。", hl: "剪影" } ] },
+  { n: 3, t: "融合：元素是长出来的还是贴上去的", items: [
+    { q: "拿掉创意元素，轮廓会塌掉（说明它是长出来的）", fix: "让创意元素替换掉一个原有部位，比如直接变成耳朵、头顶或头型。", hl: "融合创意" },
+    { q: "这张脸换到别的角色上，能看出区别（不是通用娃娃脸）", fix: "把物种的鼻子、嘴型、腮的形状加进脸里，或者去掉面窗让五官直接长在脸上。", hl: "五官表情" },
+    { q: "身体和头部用的是同一种形状语言（不是空白素体）", fix: "身体加肚皮色块、尾巴，手脚边缘呼应头部的造型。", hl: "比例体型" } ] },
+  { n: 4, t: "秩序：体块、比例、颜色有主次", items: [
+    { q: "大、中、小体块清楚，有一个最大的形压住全身", fix: "确定一个最大的形，其余部件缩小，拉开大小对比。", hl: "比例体型" },
+    { q: "一个主色铺大面积，点缀色在两处以上呼应", fix: "选一个主色铺大面积，点缀色降到一两个，并让它在两个以上部位出现。", hl: "配色" },
+    { q: "细节集中在头部，身体干净", fix: "删掉身体上的细节，留给头部。", hl: "比例体型" } ] },
+  { n: 5, t: "加分：态度与完整度", items: [
+    { q: "表情有态度，并且和造型、颜色说的是同一件事", fix: "先写一个性格词，再按这个性格改眼型和嘴型。", hl: "五官表情" },
+    { q: "三视图、表情、动作放在一起，仍然是同一个角色", fix: "检查背面和侧面，主特征是否还在、是否变形。", hl: "剪影" } ] }
+];
+
+/* ---------------- 启动 ---------------- */
+if (!window.supabase || !CFG.SUPABASE_URL || CFG.SUPABASE_URL.includes("你的")) { screen("config"); throw new Error("config missing"); }
+const sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
+let me = null, profile = null, isAdmin = false, recovering = false, started = false;
+
+sb.auth.onAuthStateChange((event) => {
+  if (event === "PASSWORD_RECOVERY") { recovering = true; enter(); }
+  if (event === "SIGNED_OUT") { started = false; screen("login"); }
+});
+(async () => {
+  const { data } = await sb.auth.getSession();
+  if (data.session) enter(); else screen("login");
+})();
+
+async function enter(){
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) { screen("login"); return; }
+  me = user;
+  const { data: prof } = await sb.from("profiles").select("*").eq("id", user.id).maybeSingle();
+  if (!prof || prof.role === "blocked") {
+    await sb.auth.signOut();
+    screen("login"); showErr($("#loginErr"), "这个账号没有使用权限，请联系老师。"); return;
+  }
+  profile = prof; isAdmin = prof.role === "admin";
+  if (!prof.password_set || recovering) {
+    $("#setpwWho").textContent = (prof.username || prof.email) + "，请设置登录密码";
+    screen("setpw"); return;
+  }
+  screen("app");
+  if (!started) { started = true; startApp(); }
+}
+
+/* ---------------- 登录 / 密码 ---------------- */
+$("#loginForm").onsubmit = async e => {
+  e.preventDefault();
+  const err = $("#loginErr"); showErr(err, "");
+  const id = $("#loginId").value.trim(), pw = $("#loginPw").value;
+  const btn = $("#loginBtn"); btn.disabled = true; btn.textContent = "正在登录…";
+  try {
+    let email = id;
+    if (!id.includes("@")) {
+      const { data, error } = await sb.rpc("email_for_username", { u: id });
+      if (error || !data) throw new Error("bad");
+      email = data;
+    }
+    const { error } = await sb.auth.signInWithPassword({ email, password: pw });
+    if (error) throw error;
+    await enter();
+  } catch (x) {
+    showErr(err, x?.message?.includes("Email not confirmed") ? "邮箱还没有确认，请先点邀请邮件里的链接。" : "账号或密码不对。");
+  } finally { btn.disabled = false; btn.textContent = "登录"; }
+};
+$("#forgotBtn").onclick = () => { $("#forgotForm").hidden = !$("#forgotForm").hidden; };
+$("#forgotForm").onsubmit = async e => {
+  e.preventDefault();
+  const msg = $("#forgotMsg");
+  const { error } = await sb.auth.resetPasswordForEmail($("#forgotEmail").value.trim(), { redirectTo: SITE_URL });
+  msg.hidden = false;
+  msg.textContent = error ? "发送没有成功，过一分钟再试。" : "如果这个邮箱是成员邮箱，你会收到一封重设密码的邮件。";
+};
+$("#setpwForm").onsubmit = async e => {
+  e.preventDefault();
+  const err = $("#setpwErr"); showErr(err, "");
+  const a = $("#newPw").value, b = $("#newPw2").value;
+  if (a.length < 8) return showErr(err, "密码至少 8 位。");
+  if (a !== b) return showErr(err, "两次输入的密码不一样。");
+  const { error } = await sb.auth.updateUser({ password: a });
+  if (error) return showErr(err, "保存没有成功：" + (error.message.includes("different") ? "新密码不能和旧密码一样。" : "请再试一次。"));
+  await sb.rpc("mark_password_set");
+  recovering = false; $("#newPw").value = ""; $("#newPw2").value = "";
+  await enter();
+};
+$("#logoutBtn").onclick = () => sb.auth.signOut();
+
+/* ---------------- 图片：私有存储 + 临时链接 ---------------- */
+const urlCache = new Map();
+async function signUrls(paths){
+  const now = Date.now();
+  const need = [...new Set(paths)].filter(p => p && !(urlCache.get(p)?.exp > now));
+  for (let i = 0; i < need.length; i += 100) {
+    const { data } = await sb.storage.from("images").createSignedUrls(need.slice(i, i + 100), 3600);
+    (data || []).forEach(d => { if (d.signedUrl && !d.error) urlCache.set(d.path, { url: d.signedUrl, exp: now + 3300 * 1000 }); });
+  }
+}
+function imgEl(path, alt){
+  const im = el("img"); im.alt = alt || ""; im.loading = "lazy"; im.dataset.path = path || "";
+  const c = urlCache.get(path); if (c && c.exp > Date.now()) im.src = c.url;
+  return im;
+}
+async function hydrate(root){
+  const ims = [...root.querySelectorAll("img[data-path]")].filter(i => !i.getAttribute("src"));
+  if (!ims.length) return;
+  await signUrls(ims.map(i => i.dataset.path));
+  ims.forEach(i => {
+    const c = urlCache.get(i.dataset.path);
+    if (c) i.src = c.url;
+    else { const ph = el("div", "empty", "图片还没上传"); ph.style.padding = "12px"; i.replaceWith(ph); }
+  });
+}
+async function shrink(blob, max = 1400){
+  try {
+    const bmp = await createImageBitmap(blob);
+    const s = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas"); c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+    const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(bmp, 0, 0, c.width, c.height);
+    return await new Promise(r => c.toBlob(r, "image/jpeg", 0.86));
+  } catch (e) { return blob; }
+}
+async function uploadImage(file, folder){
+  const blob = await shrink(file, 1400);
+  const path = folder + "/" + crypto.randomUUID() + ".jpg";
+  const { error } = await sb.storage.from("images").upload(path, blob, { contentType: "image/jpeg", upsert: false });
+  if (error) throw error;
+  return path;
+}
+function wireDrop(drop, input, onFiles){
+  drop.onclick = () => input.click();
+  drop.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); } };
+  input.onchange = () => { onFiles([...input.files]); input.value = ""; };
+  ["dragenter", "dragover"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", e => onFiles([...e.dataTransfer.files]));
+}
+const isImg = f => f && f.type && f.type.startsWith("image/");
+
+/* ---------------- 标签页 ---------------- */
+const TABS = { check: "check", lib: "library", sub: "recommend", review: "review", members: "members" };
+function showTab(k){
+  Object.keys(TABS).forEach(x => { $("#tab-" + x).setAttribute("aria-selected", String(x === k)); $("#view-" + x).hidden = x !== k; });
+  try { history.replaceState(null, "", "#" + TABS[k]); } catch (e) {}
+  if (k === "lib") renderLib();
+  if (k === "review") loadReview();
+  if (k === "members") loadMembers();
+  if (k === "sub") loadMySubs();
+}
+Object.keys(TABS).forEach(k => $("#tab-" + k).onclick = () => showTab(k));
+
+document.addEventListener("paste", e => {
+  if ($("#screen-app").hidden || $("#tagDlg").open) return;
+  const files = [...(e.clipboardData?.items || [])].filter(i => i.kind === "file" && i.type.startsWith("image/")).map(i => i.getAsFile()).filter(Boolean);
+  if (!files.length) return;
+  e.preventDefault();
+  if (!$("#view-check").hidden) setSelfImage(files[0]);
+  else if (!$("#view-sub").hidden) addPicked(files);
+  else if (!$("#view-lib").hidden && isAdmin) runBulk(files);
+});
+
+async function startApp(){
+  $("#whoami").textContent = (profile.username || profile.email) + (isAdmin ? " · 管理员" : "");
+  $("#tab-review").hidden = !isAdmin; $("#tab-members").hidden = !isAdmin; $("#addWrap").hidden = !isAdmin;
+  buildChecklist(); buildFilters(); buildTagForm();
+  await loadRefs();
+  if (isAdmin) refreshPending();
+  const k = Object.keys(TABS).find(x => "#" + TABS[x] === location.hash);
+  showTab(k && !$("#tab-" + k).hidden ? k : "check");
+}
+
+/* ---------------- 造型自查 ---------------- */
+function setSelfImage(f){
+  if (!isImg(f)) return;
+  $("#preview").src = URL.createObjectURL(f); $("#preview").hidden = false; $("#dropHint").hidden = true;
+}
+wireDrop($("#drop"), $("#file"), fs => setSelfImage(fs[0]));
+function buildChecklist(){
+  const box = $("#checklist"); box.replaceChildren();
+  LAYERS.forEach(L => {
+    const sec = el("div", "layer");
+    const h = el("div", "layer-h"); h.append(el("span", "lv", "L" + L.n), el("span", null, L.t)); sec.append(h);
+    L.items.forEach((it, i) => {
+      const lab = el("label", "ck"); lab.htmlFor = "ck-" + L.n + "-" + i;
+      const cb = el("input"); cb.type = "checkbox"; cb.id = "ck-" + L.n + "-" + i;
+      lab.append(cb, el("span", null, it.q)); sec.append(lab);
+    });
+    box.append(sec);
+  });
+}
+$("#checkReset").onclick = () => { document.querySelectorAll("#checklist input").forEach(c => c.checked = false); $("#checkResult").replaceChildren(); };
+$("#checkRun").onclick = () => {
+  const misses = [];
+  LAYERS.forEach(L => L.items.forEach((it, i) => { if (!$("#ck-" + L.n + "-" + i).checked) misses.push({ ...it, n: L.n }); }));
+  const core = misses.filter(m => m.n <= 4);
+  const failLayer = core.length ? core[0].n : null;
+  const box = $("#checkResult"); box.replaceChildren();
+  const head = el("div", "verdict");
+  head.append(el("div", "stamp " + (failLayer ? "fail" : "pass"), failLayer ? "不达标" : "达标"));
+  const s = el("div");
+  s.append(el("strong", null, failLayer ? "卡在第 " + failLayer + " 层：" + LAYERS[failLayer - 1].t : "前四层都做到了"));
+  s.append(el("div", "note", failLayer ? "先只改这一层的问题，改完再从第一层重新检查。" : (misses.length ? "第五层还有可以加分的地方。" : "五层全部做到，可以推荐到案例库。")));
+  head.append(s); box.append(head);
+  const focus = failLayer ? misses.filter(m => m.n === failLayer) : misses;
+  if (focus.length) {
+    box.append(el("h2", null, failLayer ? "先改这些" : "还可以更好"));
+    const ol = el("ol", "fixes"); focus.forEach(m => ol.append(el("li", null, m.fix))); box.append(ol);
+    const later = failLayer ? misses.filter(m => m.n !== failLayer) : [];
+    if (later.length) box.append(el("p", "note", "后面几层还有 " + later.length + " 项没做到，改完第 " + failLayer + " 层再看。"));
+  }
+  const want = {};
+  misses.forEach(m => { want[m.hl] = (want[m.hl] || 0) + (m.n === failLayer ? 3 : 1); });
+  const sp = $("#selfSpecies").value.trim();
+  const scored = refs.map(r => {
+    let sc = 0; (r.highlights || []).forEach(h => sc += want[h] || 0);
+    if (sp && (r.species || "").split(/[、,，\s\/]/).some(x => x && (x.includes(sp) || sp.includes(x)))) sc += 2;
+    return { r, sc };
+  }).filter(x => x.sc > 0).sort((a, b) => b.sc - a.sc).slice(0, 6);
+  if (scored.length) {
+    const keys = Object.keys(want).sort((a, b) => want[b] - want[a]).slice(0, 2);
+    box.append(el("h2", null, "参考这些达标案例（亮点：" + keys.join("、") + "）"));
+    const g = el("div", "cards"); scored.forEach(x => g.append(refCard(x.r, x.r.learn))); box.append(g);
+    hydrate(g);
+  }
+};
+
+/* ---------------- 案例库 ---------------- */
+let refs = [];
+async function loadRefs(){
+  const { data, error } = await sb.from("refs").select("*").order("is_base", { ascending: false }).order("created_at", { ascending: true });
+  if (!error) refs = data || [];
+}
+const uncategorized = r => !r.feature_cat && !(r.highlights || []).length;
+const FEAT_KW = { "帽子/头饰": ["帽", "头饰", "头套"], "头顶元素": ["头顶"] };
+const FACETS = [
+  { key: "hl", label: "亮点", opts: HIGHLIGHTS, match: (r, v) => (r.highlights || []).includes(v) },
+  { key: "feature", label: "主特征", opts: FEATURE_CATS, match: (r, v) => r.feature_cat === v || (FEAT_KW[v] || [v]).some(k => ((r.feature || "") + (r.fusion || "")).includes(k)) },
+  { key: "style", label: "风格", opts: ["3D软胶", "2D平面", "娃系"], match: (r, v) => (r.style || "").includes(v) },
+  { key: "species", label: "物种", opts: ["兔", "猫", "熊", "狗", "考拉", "狐狸", "羊", "鸭", "小怪", "蘑菇"], match: (r, v) => (r.species || "").includes(v) },
+  { key: "src", label: "来源", admin: true, opts: ["教学组原始库", "学生推荐", "老师上传", "未分类"], match: (r, v) => v === "未分类" ? uncategorized(r) : v === "学生推荐" ? !!r.from_user : v === "老师上传" ? (!r.is_base && !r.from_user) : r.is_base }
+];
+const active = {};
+function buildFilters(){
+  const f = $("#filters"); f.replaceChildren();
+  FACETS.filter(F => !F.admin || isAdmin).forEach(F => {
+    const row = el("div", "chips"); row.append(el("span", "lbl", F.label));
+    F.opts.forEach(o => {
+      const c = el("button", "chip", o); c.type = "button"; c.setAttribute("aria-pressed", "false");
+      c.onclick = () => { active[F.key] = active[F.key] === o ? null : o; [...row.querySelectorAll(".chip")].forEach(x => x.setAttribute("aria-pressed", String(active[F.key] === x.textContent))); renderLib(); };
+      row.append(c);
+    });
+    f.append(row);
+  });
+  $("#q").oninput = renderLib;
+}
+function refCard(r, why){
+  const b = el("button", "card"); b.type = "button";
+  const ph = el("div", "ph"); ph.append(imgEl(r.image_path, r.name));
+  const bd = el("div", "bd");
+  bd.append(el("div", "nm", r.name), el("div", "mt", [r.species, r.feature, r.style].filter(Boolean).join(" · ")));
+  const hl = el("div", "hl");
+  (r.highlights || []).forEach(h => hl.append(el("span", null, h)));
+  if (isAdmin && uncategorized(r)) hl.append(el("span", "unc", "未分类"));
+  if (hl.childNodes.length) bd.append(hl);
+  if (why) bd.append(el("div", "why", why));
+  b.append(ph, bd);
+  b.onclick = () => openRef(r);
+  return b;
+}
+function renderLib(){
+  const q = $("#q").value.trim();
+  const list = refs.filter(r => {
+    const hay = [r.name, r.species, r.fusion, r.feature, r.feature_cat, r.colors, r.style, r.mood, r.learn, (r.highlights || []).join(" ")].join(" ");
+    if (q && !q.split(/\s+/).every(w => hay.includes(w))) return false;
+    return FACETS.every(F => !active[F.key] || F.match(r, active[F.key]));
+  });
+  $("#libCount").textContent = list.length + " / " + refs.length + " 个案例";
+  const g = $("#libCards"); g.replaceChildren();
+  if (!list.length) { g.append(el("div", "empty", refs.length ? "没有符合条件的案例，试试减少筛选条件。" : "案例库还是空的。")); return; }
+  list.forEach(r => g.append(refCard(r)));
+  hydrate(g);
+}
+function openRef(r){
+  const body = $("#dlgBody"); body.replaceChildren();
+  const im = imgEl(r.image_path, r.name);
+  const right = el("div"); right.append(el("h2", "h-first", r.name));
+  const dl = el("dl");
+  [["物种", r.species], ["主特征分类", r.feature_cat], ["主特征", r.feature], ["跨界元素", r.fusion], ["配色", r.colors], ["风格", r.style], ["表情", r.mood], ["亮点", (r.highlights || []).join("、")], ["借鉴点", r.learn], ["推荐理由", r.note]]
+    .forEach(([k, v]) => { if (v) dl.append(el("dt", null, k), el("dd", null, v)); });
+  right.append(dl);
+  if (isAdmin && r.id) {
+    const acts = el("div", "row");
+    const ed = el("button", "btn ghost small", uncategorized(r) ? "分类" : "编辑分类"); ed.type = "button";
+    ed.onclick = () => { $("#dlg").close(); openTagForm({ title: "分类与标签", tags: r, path: r.image_path, onSave: async t => {
+      const { error } = await sb.from("refs").update(t).eq("id", r.id); if (error) throw error; await loadRefs(); renderLib(); } }); };
+    const rm = el("button", "btn ghost small", "从案例库移除"); rm.type = "button";
+    rm.onclick = async () => {
+      if (!rm.dataset.armed) { rm.dataset.armed = "1"; rm.textContent = "再点一次确认移除"; rm.classList.add("danger"); return; }
+      rm.disabled = true;
+      const { error } = await sb.from("refs").delete().eq("id", r.id);
+      if (error) { rm.textContent = "移除没有成功"; return; }
+      if (r.image_path.startsWith("refs/")) await sb.storage.from("images").remove([r.image_path]);
+      $("#dlg").close(); await loadRefs(); renderLib();
+    };
+    acts.append(ed, rm); right.append(acts);
+  }
+  body.append(im, right);
+  hydrate(body);
+  $("#dlg").showModal();
+}
+$("#dlgClose").onclick = () => $("#dlg").close();
+
+/* 老师批量上传 */
+$("#bulkOpen").onclick = () => $("#bulkFile").click();
+$("#bulkFile").onchange = () => { const fs = [...$("#bulkFile").files]; $("#bulkFile").value = ""; runBulk(fs); };
+async function runBulk(files){
+  const prog = $("#bulkProg");
+  for (const f of files.filter(isImg)) {
+    const nm = (f.name || "粘贴的图片").replace(/\.[^.]+$/, "");
+    const li = el("li", null, nm + "：上传中…"); prog.prepend(li);
+    try {
+      const path = await uploadImage(f, "refs");
+      const { error } = await sb.from("refs").insert({ name: nm === "image" ? "新案例" : nm, image_path: path });
+      if (error) throw error;
+      li.textContent = nm + "：已加入，在「来源 → 未分类」里点开它进行分类";
+    } catch (e) { li.textContent = nm + "：没有成功，请再试一次"; li.style.color = "var(--fail)"; }
+  }
+  await loadRefs(); renderLib();
+}
+
+/* ---------------- 分类表单 ---------------- */
+const TAG_KEYS = ["name", "species", "feature_cat", "feature", "fusion", "colors", "style", "mood", "learn"];
+function buildTagForm(){
+  $("#a-feature_cat").replaceChildren(...[""].concat(FEATURE_CATS).map(c => { const o = el("option", null, c || "（未分类）"); o.value = c; return o; }));
+  $("#a-style").replaceChildren(...[""].concat(STYLES).map(c => { const o = el("option", null, c || "（未选）"); o.value = c; return o; }));
+  const box = $("#a-highlights");
+  HIGHLIGHTS.forEach((h, i) => { const lb = el("label"); lb.htmlFor = "hl-" + i; const cb = el("input"); cb.type = "checkbox"; cb.id = "hl-" + i; cb.value = h; lb.append(cb, document.createTextNode(h)); box.append(lb); });
+}
+let tagSave = null;
+function openTagForm({ title, tags, path, onSave, saveLabel }){
+  $("#tagTitle").textContent = title;
+  const p = $("#tagPreview"); p.replaceChildren(); if (path) { p.append(imgEl(path)); hydrate(p); }
+  TAG_KEYS.forEach(k => $("#a-" + k).value = tags?.[k] || "");
+  document.querySelectorAll("#a-highlights input").forEach(cb => cb.checked = (tags?.highlights || []).includes(cb.value));
+  showErr($("#tagErr"), ""); $("#tagSave").disabled = false; $("#tagSave").textContent = saveLabel || "保存";
+  tagSave = onSave; $("#tagDlg").showModal();
+}
+$("#tagCancel").onclick = () => $("#tagDlg").close();
+$("#tagForm").onsubmit = async e => {
+  e.preventDefault();
+  const t = {}; TAG_KEYS.forEach(k => t[k] = $("#a-" + k).value.trim());
+  t.highlights = [...document.querySelectorAll("#a-highlights input:checked")].map(c => c.value);
+  if (!t.name) return showErr($("#tagErr"), "请填写名字。");
+  $("#tagSave").disabled = true;
+  try { await tagSave(t); $("#tagDlg").close(); }
+  catch (x) { showErr($("#tagErr"), "保存没有成功，请再试一次。"); $("#tagSave").disabled = false; }
+};
+
+/* ---------------- 学生推荐 ---------------- */
+let picked = [];
+const MAX_PICK = 12;
+wireDrop($("#subDrop"), $("#subFile"), fs => addPicked(fs));
+function addPicked(files){
+  showErr($("#subErr"), "");
+  files.filter(isImg).forEach(f => {
+    if (picked.length >= MAX_PICK) { showErr($("#subErr"), "一次最多 " + MAX_PICK + " 张，先提交这一批。"); return; }
+    picked.push({ key: crypto.randomUUID(), file: f, url: URL.createObjectURL(f), note: "", state: "" });
+  });
+  renderPicked();
+}
+function renderPicked(){
+  const box = $("#subPicked"); box.replaceChildren();
+  $("#subHint").textContent = picked.length ? "已选 " + picked.length + " 张，可以继续点击、拖入或粘贴" : "点击、拖入或直接粘贴图片，可以一次多张";
+  picked.forEach((p, i) => {
+    const row = el("div", "sub-item"); row.style.gridTemplateColumns = "72px minmax(0,1fr) auto";
+    const im = el("img"); im.src = p.url; im.alt = ""; im.style.width = im.style.height = "72px";
+    const mid = el("div");
+    const inp = el("input", "inp"); inp.id = "pick-" + p.key; inp.placeholder = "这张的推荐理由（可不填）"; inp.value = p.note; inp.style.width = "100%";
+    inp.oninput = () => p.note = inp.value; mid.append(inp);
+    if (p.state) mid.append(el("p", "note", p.state));
+    const rm = el("button", "btn ghost small", "移除"); rm.type = "button"; rm.onclick = () => { picked.splice(i, 1); renderPicked(); };
+    row.append(im, mid, rm); box.append(row);
+  });
+}
+$("#subSend").onclick = async () => {
+  const err = $("#subErr"); showErr(err, "");
+  if (!picked.length) return showErr(err, "先选至少一张图。");
+  const btn = $("#subSend"); btn.disabled = true;
+  const shared = $("#subNote").value.trim(), src = $("#subSrc").value.trim();
+  let failed = 0;
+  for (let i = 0; i < picked.length; i++) {
+    const p = picked[i]; btn.textContent = "正在提交 " + (i + 1) + " / " + picked.length + "…";
+    try {
+      const path = await uploadImage(p.file, "subs/" + me.id);
+      const { error } = await sb.from("submissions").insert({ user_id: me.id, image_path: path, note: p.note.trim() || shared, src });
+      if (error) throw error;
+      p.done = true;
+    } catch (e) { failed++; p.state = "没有提交成功"; }
+  }
+  picked = picked.filter(p => !p.done); renderPicked();
+  if (failed) showErr(err, failed + " 张没有提交成功，留在列表里了，可以再点一次提交。");
+  else { $("#subNote").value = ""; $("#subSrc").value = ""; }
+  btn.disabled = false; btn.textContent = "提交推荐";
+  loadMySubs();
+};
+const ST = { pending: ["待审核", "warn"], approved: ["已收录", "pass"], rejected: ["未通过", "fail"] };
+async function loadMySubs(){
+  const box = $("#mySubs");
+  const { data, error } = await sb.from("submissions").select("*").eq("user_id", me.id).order("created_at", { ascending: false });
+  box.replaceChildren();
+  if (error) { box.append(el("div", "empty", "加载没有成功，刷新页面再试。")); return; }
+  if (!data.length) { box.append(el("div", "empty", "还没有推荐。看到好看的 IP，传上来给大家参考吧。")); return; }
+  data.forEach(it => {
+    const row = el("div", "sub-item");
+    const r = el("div"); const st = ST[it.status] || ST.pending;
+    r.append(el("span", "pill " + st[1], st[0]));
+    const p = el("p", null, it.note || "（没有写推荐理由）"); p.style.cssText = "margin:6px 0 0;font-size:14px"; r.append(p);
+    if (it.status === "rejected" && it.reason) r.append(el("p", "note", "老师的意见：" + it.reason));
+    let act = el("span");
+    if (it.status === "pending") {
+      act = el("button", "btn ghost small", "撤回"); act.type = "button";
+      act.onclick = async () => { act.disabled = true; await sb.from("submissions").delete().eq("id", it.id); await sb.storage.from("images").remove([it.image_path]); loadMySubs(); };
+    }
+    row.append(imgEl(it.image_path), r, act); box.append(row);
+  });
+  hydrate(box);
+}
+
+/* ---------------- 审核（管理员） ---------------- */
+let subs = [], people = {}, revStatus = "pending";
+const sel = new Set();
+[...$("#revFilter").children].forEach(b => b.onclick = () => { revStatus = b.dataset.st; [...$("#revFilter").children].forEach(x => x.setAttribute("aria-pressed", String(x === b))); renderReview(); });
+async function refreshPending(){
+  const { count } = await sb.from("submissions").select("id", { count: "exact", head: true }).eq("status", "pending");
+  $("#pendCount").textContent = count ? String(count) : "";
+}
+async function loadPeople(){
+  const { data } = await sb.from("profiles").select("id,email,username,role");
+  people = {}; (data || []).forEach(p => people[p.id] = p);
+}
+async function loadReview(){
+  const [{ data }] = await Promise.all([sb.from("submissions").select("*").order("created_at", { ascending: false }), loadPeople()]);
+  subs = data || []; renderReview();
+}
+const whoOf = id => { const p = people[id]; return p ? (p.username || p.email) : "已删除的成员"; };
+const pend = () => subs.filter(s => s.status === "pending");
+const targets = () => { const p = pend(); const s = p.filter(x => sel.has(x.id)); return s.length ? s : p; };
+function armConfirm(btn, label, fn){
+  const base = btn.textContent;
+  btn.onclick = async () => {
+    if (!btn.dataset.armed) {
+      btn.dataset.armed = "1"; btn.textContent = label(); btn.classList.add("danger");
+      setTimeout(() => { if (btn.dataset.armed) { delete btn.dataset.armed; btn.textContent = base; btn.classList.remove("danger"); } }, 5000);
+      return;
+    }
+    delete btn.dataset.armed; btn.textContent = base; btn.classList.remove("danger");
+    btn.disabled = true; try { await fn(); } finally { btn.disabled = false; }
+  };
+}
+async function approve(it, tags){
+  const row = { name: tags?.name || (it.src ? it.src.slice(0, 30) : "学生推荐"), image_path: it.image_path, from_user: it.user_id, note: it.note || "", ...(tags || {}) };
+  const { error } = await sb.from("refs").insert(row); if (error) throw error;
+  const { error: e2 } = await sb.from("submissions").update({ status: "approved", reviewed_at: new Date().toISOString() }).eq("id", it.id); if (e2) throw e2;
+}
+async function reject(it, reason){
+  const { error } = await sb.from("submissions").update({ status: "rejected", reason: reason || "", reviewed_at: new Date().toISOString() }).eq("id", it.id);
+  if (error) throw error;
+}
+async function afterReview(msg){ $("#bulkMsg").textContent = msg; sel.clear(); await Promise.all([loadReview(), loadRefs(), refreshPending()]); }
+armConfirm($("#bulkOk"), () => "确认通过 " + targets().length + " 条", async () => {
+  const list = targets(); let ok = 0;
+  for (const it of list) { $("#bulkMsg").textContent = "正在收录 " + (ok + 1) + " / " + list.length + "…"; try { await approve(it); ok++; } catch (e) {} }
+  await afterReview("已收录 " + ok + " 条，它们在案例库「来源 → 未分类」里，点开就能分类。");
+});
+armConfirm($("#bulkNo"), () => "确认退回 " + targets().length + " 条", async () => {
+  const list = targets(); const reason = $("#bulkReason").value.trim(); let ok = 0;
+  for (const it of list) { try { await reject(it, reason); ok++; } catch (e) {} }
+  $("#bulkReason").value = "";
+  await afterReview("已退回 " + ok + " 条。");
+});
+$("#selAll").onchange = () => { sel.clear(); if ($("#selAll").checked) pend().forEach(x => sel.add(x.id)); renderReview(); };
+function renderReview(){
+  const p = pend();
+  $("#pendCount").textContent = p.length ? String(p.length) : "";
+  [...sel].forEach(id => { if (!p.some(x => x.id === id)) sel.delete(id); });
+  const isPend = revStatus === "pending";
+  $("#bulkBar").hidden = !isPend || !p.length;
+  $("#selAll").checked = p.length > 0 && sel.size === p.length;
+  $("#selInfo").textContent = sel.size ? "已选 " + sel.size + " 条，批量操作只作用于选中的" : "不勾选时，批量操作作用于全部 " + p.length + " 条";
+  const list = subs.filter(s => s.status === revStatus);
+  const box = $("#revList"); box.replaceChildren();
+  if (!list.length) { box.append(el("div", "empty", isPend ? "没有待审核的推荐。" : "这里还是空的。")); return; }
+  list.forEach(it => {
+    const card = el("div", "rev");
+    const im = imgEl(it.image_path, "学生推荐的造型图");
+    im.onclick = () => openRef({ name: "学生推荐", image_path: it.image_path, note: it.note });
+    const r = el("div");
+    const top = el("div", "meta");
+    if (isPend) { const cb = el("input"); cb.type = "checkbox"; cb.id = "sel-" + it.id; cb.checked = sel.has(it.id); cb.onchange = () => { cb.checked ? sel.add(it.id) : sel.delete(it.id); renderReview(); }; top.append(cb); }
+    top.append(document.createTextNode(whoOf(it.user_id) + " · " + new Date(it.created_at).toLocaleDateString("zh-CN") + (it.src ? " · 出处：" + it.src : "")));
+    r.append(top);
+    const n = el("p", null, "推荐理由：" + (it.note || "（没有填写）")); n.style.margin = "6px 0 0"; r.append(n);
+    if (isPend) {
+      const acts = el("div", "row");
+      const ok = el("button", "btn small", "收录并分类"); ok.type = "button";
+      ok.onclick = () => openTagForm({ title: "收录并分类", saveLabel: "确认收录", path: it.image_path, tags: { name: it.src ? it.src.slice(0, 30) : "" }, onSave: async t => { await approve(it, t); await afterReview("已收录 1 条。"); } });
+      const quick = el("button", "btn ghost small", "直接收录（稍后分类）"); quick.type = "button";
+      quick.onclick = async () => { quick.disabled = true; try { await approve(it); await afterReview("已收录 1 条，稍后在案例库「未分类」里分类。"); } catch (e) { quick.disabled = false; quick.textContent = "没有成功，再试一次"; } };
+      acts.append(ok, quick); r.append(acts);
+      const acts2 = el("div", "row");
+      const rs = el("input", "inp"); rs.id = "reason-" + it.id; rs.placeholder = "不通过的原因（学生能看到，可不填）";
+      const no = el("button", "btn ghost small", "不通过"); no.type = "button";
+      no.onclick = async () => { no.disabled = true; try { await reject(it, rs.value.trim()); await afterReview("已退回 1 条。"); } catch (e) { no.disabled = false; no.textContent = "没有成功，再试一次"; } };
+      acts2.append(rs, no); r.append(acts2);
+    } else if (it.status === "rejected" && it.reason) r.append(el("p", "note", "不通过原因：" + it.reason));
+    card.append(im, r); box.append(card);
+  });
+  hydrate(box);
+}
+
+/* ---------------- 成员与邀请（管理员） ---------------- */
+// 发送邀请用一个不保存登录状态的独立连接，避免影响管理员自己的登录。
+const inviter = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: "ip-inviter" } });
+async function sendInvite(email){
+  const { error: e1 } = await sb.from("invites").upsert({ email: email.toLowerCase() });
+  if (e1) throw e1;
+  const { error } = await inviter.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: SITE_URL } });
+  if (error) throw error;
+}
+$("#inviteSend").onclick = async () => {
+  const emails = $("#inviteEmails").value.split(/[\s,，;；]+/).map(s => s.trim()).filter(s => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s));
+  const prog = $("#inviteProg");
+  if (!emails.length) { prog.prepend(el("li", null, "没有找到有效的邮箱，每行写一个。")); return; }
+  const btn = $("#inviteSend"); btn.disabled = true;
+  for (const em of emails) {
+    const li = el("li", null, em + "：发送中…"); prog.prepend(li);
+    try { await sendInvite(em); li.textContent = em + "：邀请邮件已发送"; }
+    catch (e) { li.textContent = em + "：没有发送成功" + (String(e?.message || "").includes("rate") ? "（发送太频繁，过一会儿再试）" : ""); li.style.color = "var(--fail)"; }
+  }
+  btn.disabled = false; $("#inviteEmails").value = "";
+  loadMembers();
+};
+async function loadMembers(){
+  const [{ data: inv }] = await Promise.all([sb.from("invites").select("*").order("invited_at", { ascending: false }), loadPeople()]);
+  const box = $("#memberList"); box.replaceChildren();
+  const byEmail = {}; Object.values(people).forEach(p => byEmail[(p.email || "").toLowerCase()] = p);
+  const rows = [];
+  Object.values(people).forEach(p => rows.push({ email: p.email, p }));
+  (inv || []).forEach(i => { if (!byEmail[i.email.toLowerCase()]) rows.push({ email: i.email, p: null }); });
+  if (!rows.length) { box.append(el("div", "empty", "还没有成员。")); return; }
+  rows.forEach(({ email, p }) => {
+    const row = el("div", "member");
+    const left = el("div"); left.append(el("div", null, p?.username ? p.username + "（" + email + "）" : email));
+    const status = !p ? ["已邀请，还没进入", "warn"] : p.role === "admin" ? ["管理员", "pass"] : p.role === "blocked" ? ["已停用", "fail"] : ["成员", "pass"];
+    left.append(el("span", "pill " + status[1], status[0]));
+    const act = el("div", "row"); act.style.marginTop = "0";
+    if (!p) {
+      const again = el("button", "btn ghost small", "重发邀请"); again.type = "button";
+      again.onclick = async () => { again.disabled = true; try { await sendInvite(email); again.textContent = "已重发"; } catch (e) { again.textContent = "发送太频繁，稍后再试"; } };
+      const del = el("button", "btn ghost small", "取消邀请"); del.type = "button";
+      del.onclick = async () => { await sb.from("invites").delete().eq("email", email); loadMembers(); };
+      act.append(again, del);
+    } else if (p.role !== "admin") {
+      const tog = el("button", "btn ghost small", p.role === "blocked" ? "恢复使用" : "停用"); tog.type = "button";
+      tog.onclick = async () => { tog.disabled = true; await sb.from("profiles").update({ role: p.role === "blocked" ? "student" : "blocked" }).eq("id", p.id); loadMembers(); };
+      act.append(tog);
+    }
+    row.append(left, act); box.append(row);
+  });
+}
