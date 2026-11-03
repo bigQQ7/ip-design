@@ -89,6 +89,13 @@ $("#loginForm").onsubmit = async e => {
   } finally { btn.disabled = false; btn.textContent = "登录"; }
 };
 $("#forgotBtn").onclick = () => { $("#forgotForm").hidden = !$("#forgotForm").hidden; };
+$("#magicBtn").onclick = () => { $("#magicForm").hidden = !$("#magicForm").hidden; };
+$("#magicForm").onsubmit = async e => {
+  e.preventDefault();
+  const msg = $("#magicMsg"); msg.hidden = false; msg.textContent = "发送中…";
+  const { error } = await sb.auth.signInWithOtp({ email: $("#magicEmail").value.trim(), options: { shouldCreateUser: true, emailRedirectTo: SITE_URL } });
+  msg.textContent = error ? (String(error.message).includes("invited") || String(error.message).includes("Database") ? "这个邮箱还没有被邀请，请联系老师。" : "发送没有成功，过一分钟再试。") : "登录链接已发送，去邮箱点链接进入（也看看垃圾邮件箱）。";
+};
 $("#forgotForm").onsubmit = async e => {
   e.preventDefault();
   const msg = $("#forgotMsg");
@@ -351,6 +358,22 @@ async function runBulk(files){
   }
   await loadRefs(); renderLib();
 }
+
+/* 导入基础案例图片（文件名 r01.jpg ~ r78.jpg） */
+$("#baseOpen").onclick = () => $("#baseFile").click();
+$("#baseFile").onchange = async () => {
+  const files = [...$("#baseFile").files].filter(f => /^r\d{2}\.jpe?g$/i.test(f.name)); $("#baseFile").value = "";
+  const li = el("li", null, ""); $("#bulkProg").prepend(li);
+  if (!files.length) { li.textContent = "没有找到 r01.jpg 这样命名的图片。"; return; }
+  let ok = 0;
+  for (const f of files) {
+    li.textContent = "正在导入基础案例图片 " + (ok + 1) + " / " + files.length + "…";
+    const { error } = await sb.storage.from("images").upload("base/" + f.name.toLowerCase().replace(".jpeg", ".jpg"), f, { contentType: "image/jpeg", upsert: true });
+    if (!error) ok++;
+  }
+  li.textContent = "基础案例图片导入完成：" + ok + " / " + files.length + " 张。";
+  urlCache.clear(); renderLib();
+};
 
 /* ---------------- 分类表单 ---------------- */
 const TAG_KEYS = ["name", "species", "feature_cat", "feature", "fusion", "colors", "style", "mood", "learn"];

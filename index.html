@@ -27,6 +27,12 @@
       <p class="note" id="forgotMsg" hidden></p>
       <button class="btn ghost wide" type="submit">发送重设密码邮件</button>
     </form>
+    <button class="link" type="button" id="magicBtn">第一次使用，或邀请链接过期了？</button>
+    <form id="magicForm" hidden>
+      <label class="field" for="magicEmail">被邀请的邮箱<input id="magicEmail" type="email" required></label>
+      <p class="note" id="magicMsg" hidden></p>
+      <button class="btn ghost wide" type="submit">发送登录链接到邮箱</button>
+    </form>
     <p class="note">收到邀请邮件的同学，请点击邮件里的链接进入并设置密码。</p>
   </div>
 </main>
@@ -106,6 +112,11 @@
           <span class="note" style="margin:0">也可以在这一页直接粘贴图片。上传后进入「未分类」，点开案例手动分类。</span>
         </div>
         <input type="file" id="bulkFile" accept="image/*" multiple hidden>
+        <div class="row" style="align-items:center">
+          <button class="btn ghost small" id="baseOpen" type="button">导入基础案例图片</button>
+          <span class="note" style="margin:0">选中「案例图片-base.zip」解压后的 r01.jpg～r78.jpg，一次全选即可。</span>
+        </div>
+        <input type="file" id="baseFile" accept="image/jpeg" multiple hidden>
         <ul class="prog" id="bulkProg"></ul>
       </div>
     </div>

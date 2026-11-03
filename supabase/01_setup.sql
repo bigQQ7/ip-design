@@ -111,7 +111,7 @@ begin
   insert into profiles (id, email, username, role, password_set)
   values (new.id, lower(new.email), a.username,
           case when a.email is not null then 'admin' else 'student' end,
-          a.email is not null)
+          false)
   on conflict (id) do nothing;
   return new;
 end;
