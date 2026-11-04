@@ -6,7 +6,7 @@
 <title>IP造型诊断台</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=ZCOOL+QingKe+HuangYou&family=JetBrains+Mono:wght@500&display=swap">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 
@@ -109,7 +109,7 @@
       <div class="addbox" id="addWrap" hidden>
         <div class="row" style="margin-top:0;align-items:center">
           <button class="btn" id="bulkOpen" type="button">上传达标案例（可多选）</button>
-          <span class="note" style="margin:0">也可以在这一页直接粘贴图片。上传后进入「未分类」，点开案例手动分类。</span>
+          <span class="note" style="margin:0">也可以在这一页直接粘贴图片。选好图片后先选分类再上传。</span>
         </div>
         <input type="file" id="bulkFile" accept="image/*" multiple hidden>
         <div class="row" style="align-items:center">
@@ -197,15 +197,8 @@
     <h2 class="h-first" id="tagTitle">分类与标签</h2>
     <div id="tagPreview"></div>
     <label class="field" for="a-name">名字<input id="a-name" required></label>
-    <div class="two">
-      <label class="field" for="a-species">物种<input id="a-species" placeholder="兔、猫、小怪兽…"></label>
-      <label class="field" for="a-feature_cat">主特征分类<select id="a-feature_cat"></select></label>
-    </div>
-    <fieldset class="field hl-set" id="a-highlights"><legend>亮点（可多选）</legend></fieldset>
-    <div class="two">
-      <label class="field" for="a-style">风格<select id="a-style"></select></label>
-      <label class="field" for="a-mood">表情<input id="a-mood" placeholder="不屑、犯困、开心…"></label>
-    </div>
+    <div id="tagCats"></div>
+    <label class="field" for="a-mood">表情<input id="a-mood" placeholder="不屑、犯困、开心…"></label>
     <label class="field" for="a-feature">主特征（具体描述）<input id="a-feature" placeholder="超大圆耳、黄色蘑菇帽…"></label>
     <label class="field" for="a-fusion">跨界元素<input id="a-fusion" placeholder="葡萄、高压锅；没有写 无"></label>
     <label class="field" for="a-colors">配色<input id="a-colors" placeholder="灰白主色+橙红围巾点缀"></label>
@@ -218,8 +211,22 @@
   </form>
 </dialog>
 
+<dialog id="upDlg">
+  <form id="upForm" class="tagform">
+    <h2 class="h-first">上传达标案例</h2>
+    <p class="note" style="margin-top:0" id="upCount"></p>
+    <div id="upThumbs" class="thumbs"></div>
+    <p class="note">选的分类会用在这一批所有图片上。不选也可以，之后在「来源 → 未分类」里再逐个分类。</p>
+    <div id="upCats"></div>
+    <div class="row end">
+      <button class="btn ghost" id="upCancel" type="button">取消</button>
+      <button class="btn" id="upGo" type="submit">上传</button>
+    </div>
+  </form>
+</dialog>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="config.js"></script>
-<script src="app.js"></script>
+<script src="config.js?v=2"></script>
+<script src="app.js?v=2"></script>
 </body>
 </html>

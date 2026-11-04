@@ -9,9 +9,14 @@ const SCREENS = ["login", "setpw", "config", "app"];
 function screen(name){ SCREENS.forEach(s => $("#screen-" + s).hidden = s !== name); }
 function showErr(node, msg){ node.textContent = msg; node.hidden = !msg; }
 
-const HIGHLIGHTS = ["五官表情", "剪影", "融合创意", "配色", "比例体型"];
-const FEATURE_CATS = ["耳朵", "头型", "帽子/头饰", "头顶元素", "尾巴", "嘴", "角", "表情", "体型", "发型"];
-const STYLES = ["3D软胶", "2D平面", "娃系", "3D软胶/2D"];
+/* 分类：从数据库读取，管理员可以新建、删除 */
+const DIMS = { hl: "亮点", feature: "主特征", style: "风格", species: "物种" };
+let CATS = {
+  hl: ["五官表情", "剪影", "融合创意", "配色", "比例体型"],
+  feature: ["耳朵", "头型", "帽子/头饰", "头顶元素", "尾巴", "嘴", "角", "表情", "体型", "发型"],
+  style: ["3D软胶", "2D平面", "娃系"],
+  species: ["兔", "猫", "熊", "狗", "考拉", "狐狸", "羊", "鸭", "小怪", "蘑菇"]
+};
 
 /* ---------------- 五层自查清单 ---------------- */
 const LAYERS = [
@@ -181,7 +186,7 @@ function showTab(k){
 Object.keys(TABS).forEach(k => $("#tab-" + k).onclick = () => showTab(k));
 
 document.addEventListener("paste", e => {
-  if ($("#screen-app").hidden || $("#tagDlg").open) return;
+  if ($("#screen-app").hidden || $("#tagDlg").open || $("#dlg").open) return;
   const files = [...(e.clipboardData?.items || [])].filter(i => i.kind === "file" && i.type.startsWith("image/")).map(i => i.getAsFile()).filter(Boolean);
   if (!files.length) return;
   e.preventDefault();
@@ -193,7 +198,9 @@ document.addEventListener("paste", e => {
 async function startApp(){
   $("#whoami").textContent = (profile.username || profile.email) + (isAdmin ? " · 管理员" : "");
   $("#tab-review").hidden = !isAdmin; $("#tab-members").hidden = !isAdmin; $("#addWrap").hidden = !isAdmin;
-  buildChecklist(); buildFilters(); buildTagForm();
+  await loadCats();
+  $("#q").oninput = renderLib;
+  buildChecklist(); buildFilters();
   await loadRefs();
   if (isAdmin) refreshPending();
   const k = Object.keys(TABS).find(x => "#" + TABS[x] === location.hash);
@@ -264,25 +271,106 @@ async function loadRefs(){
 const uncategorized = r => !r.feature_cat && !(r.highlights || []).length;
 const FEAT_KW = { "帽子/头饰": ["帽", "头饰", "头套"], "头顶元素": ["头顶"] };
 const FACETS = [
-  { key: "hl", label: "亮点", opts: HIGHLIGHTS, match: (r, v) => (r.highlights || []).includes(v) },
-  { key: "feature", label: "主特征", opts: FEATURE_CATS, match: (r, v) => r.feature_cat === v || (FEAT_KW[v] || [v]).some(k => ((r.feature || "") + (r.fusion || "")).includes(k)) },
-  { key: "style", label: "风格", opts: ["3D软胶", "2D平面", "娃系"], match: (r, v) => (r.style || "").includes(v) },
-  { key: "species", label: "物种", opts: ["兔", "猫", "熊", "狗", "考拉", "狐狸", "羊", "鸭", "小怪", "蘑菇"], match: (r, v) => (r.species || "").includes(v) },
+  { key: "hl", dim: "hl", label: "亮点", opts: () => CATS.hl, match: (r, v) => (r.highlights || []).includes(v) },
+  { key: "feature", dim: "feature", label: "主特征", opts: () => CATS.feature, match: (r, v) => r.feature_cat === v || (FEAT_KW[v] || [v]).some(k => ((r.feature || "") + (r.fusion || "")).includes(k)) },
+  { key: "style", dim: "style", label: "风格", opts: () => CATS.style, match: (r, v) => (r.style || "").includes(v) },
+  { key: "species", dim: "species", label: "物种", opts: () => CATS.species, match: (r, v) => (r.species || "").includes(v) },
   { key: "src", label: "来源", admin: true, opts: ["教学组原始库", "学生推荐", "老师上传", "未分类"], match: (r, v) => v === "未分类" ? uncategorized(r) : v === "学生推荐" ? !!r.from_user : v === "老师上传" ? (!r.is_base && !r.from_user) : r.is_base }
 ];
 const active = {};
+let manageCats = false;
+async function loadCats(){
+  const { data, error } = await sb.from("categories").select("dim,name,sort,created_at").order("sort").order("created_at");
+  if (error || !data || !data.length) return;
+  const c = { hl: [], feature: [], style: [], species: [] };
+  data.forEach(r => { if (c[r.dim]) c[r.dim].push(r.name); });
+  CATS = c;
+}
+async function addCat(dim){
+  const name = (prompt("新建「" + DIMS[dim] + "」分类，输入名称：") || "").trim();
+  if (!name) return null;
+  if (CATS[dim].includes(name)) return name;
+  const { error } = await sb.from("categories").insert({ dim, name, sort: CATS[dim].length });
+  if (error) { alert("添加没有成功，请再试一次。"); return null; }
+  CATS[dim].push(name); buildFilters();
+  return name;
+}
+async function delCat(dim, name){
+  const { error } = await sb.from("categories").delete().eq("dim", dim).eq("name", name);
+  if (!error) CATS[dim] = CATS[dim].filter(x => x !== name);
+}
 function buildFilters(){
   const f = $("#filters"); f.replaceChildren();
   FACETS.filter(F => !F.admin || isAdmin).forEach(F => {
     const row = el("div", "chips"); row.append(el("span", "lbl", F.label));
-    F.opts.forEach(o => {
-      const c = el("button", "chip", o); c.type = "button"; c.setAttribute("aria-pressed", "false");
-      c.onclick = () => { active[F.key] = active[F.key] === o ? null : o; [...row.querySelectorAll(".chip")].forEach(x => x.setAttribute("aria-pressed", String(active[F.key] === x.textContent))); renderLib(); };
+    const all = el("button", "chip", "全部"); all.type = "button";
+    all.setAttribute("aria-pressed", String(!active[F.key]));
+    all.onclick = () => { active[F.key] = null; buildFilters(); renderLib(); };
+    row.append(all);
+    const opts = typeof F.opts === "function" ? F.opts() : F.opts;
+    opts.forEach(o => {
+      const c = el("button", "chip", manageCats && F.dim ? o + " ×" : o); c.type = "button";
+      c.setAttribute("aria-pressed", String(active[F.key] === o));
+      c.onclick = async () => {
+        if (manageCats && F.dim) {
+          if (!c.dataset.armed) { c.dataset.armed = "1"; c.textContent = "删除「" + o + "」？再点一次"; c.classList.add("chip-danger"); return; }
+          await delCat(F.dim, o); if (active[F.key] === o) active[F.key] = null; buildFilters(); renderLib(); return;
+        }
+        active[F.key] = active[F.key] === o ? null : o; buildFilters(); renderLib();
+      };
       row.append(c);
     });
+    if (isAdmin && F.dim) {
+      const add = el("button", "chip chip-add", "+ 新分类"); add.type = "button";
+      add.onclick = () => addCat(F.dim);
+      row.append(add);
+    }
     f.append(row);
   });
-  $("#q").oninput = renderLib;
+  if (isAdmin) {
+    const m = el("button", "link", manageCats ? "完成" : "管理分类（删除不用的分类）"); m.type = "button";
+    m.onclick = () => { manageCats = !manageCats; buildFilters(); };
+    f.append(m);
+    if (manageCats) f.append(el("p", "note", "点一个分类两次就会删除它。删除分类不会改动已经分好类的案例。"));
+  }
+}
+/* 分类选择器：上传和编辑共用 */
+function catPicker(root){
+  root.replaceChildren();
+  const groups = {};
+  const make = (dim, label, multi) => {
+    const wrap = el("div", "field"); wrap.append(el("span", null, label + (multi ? "（可多选）" : "")));
+    const box = el("div", "chips"); wrap.append(box);
+    const g = { sel: new Set() };
+    g.draw = () => {
+      box.replaceChildren();
+      const list = CATS[dim].concat([...g.sel].filter(v => !CATS[dim].includes(v)));
+      list.forEach(o => {
+        const c = el("button", "chip", o); c.type = "button"; c.setAttribute("aria-pressed", String(g.sel.has(o)));
+        c.onclick = () => { if (g.sel.has(o)) g.sel.delete(o); else { if (!multi) g.sel.clear(); g.sel.add(o); } g.draw(); };
+        box.append(c);
+      });
+      if (isAdmin) {
+        const a = el("button", "chip chip-add", "+ 新分类"); a.type = "button";
+        a.onclick = async () => { const n = await addCat(dim); if (n) { if (!multi) g.sel.clear(); g.sel.add(n); g.draw(); } };
+        box.append(a);
+      }
+    };
+    groups[dim] = g; root.append(wrap); g.draw();
+  };
+  make("hl", "亮点", true); make("feature", "主特征分类", false); make("style", "风格", false); make("species", "物种", true);
+  return {
+    set(t){
+      groups.hl.sel = new Set(t?.highlights || []);
+      groups.feature.sel = new Set(t?.feature_cat ? [t.feature_cat] : []);
+      groups.style.sel = new Set(t?.style ? [t.style] : []);
+      groups.species.sel = new Set((t?.species || "").split(/[、,，]/).map(s => s.trim()).filter(Boolean));
+      Object.values(groups).forEach(g => g.draw());
+    },
+    get(){
+      return { highlights: [...groups.hl.sel], feature_cat: [...groups.feature.sel][0] || "", style: [...groups.style.sel][0] || "", species: [...groups.species.sel].join("、") };
+    }
+  };
 }
 function refCard(r, why){
   const b = el("button", "card"); b.type = "button";
@@ -344,20 +432,46 @@ $("#dlgClose").onclick = () => $("#dlg").close();
 /* 老师批量上传 */
 $("#bulkOpen").onclick = () => $("#bulkFile").click();
 $("#bulkFile").onchange = () => { const fs = [...$("#bulkFile").files]; $("#bulkFile").value = ""; runBulk(fs); };
-async function runBulk(files){
+let upFiles = [], upPicker = null;
+function runBulk(files){
+  files = files.filter(isImg);
+  if (!files.length) return;
+  if ($("#upDlg").open) { upFiles = upFiles.concat(files); drawUpThumbs(); return; }
+  upFiles = files;
+  upPicker = catPicker($("#upCats")); upPicker.set({});
+  drawUpThumbs();
+  $("#upGo").disabled = false;
+  $("#upDlg").showModal();
+}
+function drawUpThumbs(){
+  const t = $("#upThumbs"); t.replaceChildren();
+  upFiles.forEach((f, i) => {
+    const w = el("div", "thumb"); const im = el("img"); im.src = URL.createObjectURL(f); im.alt = "";
+    const x = el("button", "thumb-x", "×"); x.type = "button"; x.setAttribute("aria-label", "移除这张");
+    x.onclick = () => { upFiles.splice(i, 1); drawUpThumbs(); if (!upFiles.length) $("#upDlg").close(); };
+    w.append(im, x); t.append(w);
+  });
+  $("#upCount").textContent = "已选 " + upFiles.length + " 张，可以继续粘贴添加。";
+}
+$("#upCancel").onclick = () => { upFiles = []; $("#upDlg").close(); };
+$("#upForm").onsubmit = async e => {
+  e.preventDefault();
+  const tags = upPicker.get();
+  const files = upFiles; upFiles = []; $("#upDlg").close();
   const prog = $("#bulkProg");
-  for (const f of files.filter(isImg)) {
+  const label = [tags.feature_cat, tags.species, tags.style, ...tags.highlights].filter(Boolean).join(" · ");
+  for (const f of files) {
     const nm = (f.name || "粘贴的图片").replace(/\.[^.]+$/, "");
     const li = el("li", null, nm + "：上传中…"); prog.prepend(li);
     try {
       const path = await uploadImage(f, "refs");
-      const { error } = await sb.from("refs").insert({ name: nm === "image" ? "新案例" : nm, image_path: path });
+      const { error } = await sb.from("refs").insert({ name: nm === "image" ? "新案例" : nm, image_path: path, ...tags });
       if (error) throw error;
-      li.textContent = nm + "：已加入，在「来源 → 未分类」里点开它进行分类";
-    } catch (e) { li.textContent = nm + "：没有成功，请再试一次"; li.style.color = "var(--fail)"; }
+      li.textContent = nm + "：已加入" + (label ? "，分类：" + label : "，还没分类，在「来源 → 未分类」里点开它分类");
+    } catch (x) { li.textContent = nm + "：没有成功，请再试一次"; li.style.color = "var(--fail)"; }
   }
   await loadRefs(); renderLib();
-}
+};
 
 /* 导入基础案例图片（文件名 r01.jpg ~ r78.jpg） */
 $("#baseOpen").onclick = () => $("#baseFile").click();
@@ -376,19 +490,14 @@ $("#baseFile").onchange = async () => {
 };
 
 /* ---------------- 分类表单 ---------------- */
-const TAG_KEYS = ["name", "species", "feature_cat", "feature", "fusion", "colors", "style", "mood", "learn"];
-function buildTagForm(){
-  $("#a-feature_cat").replaceChildren(...[""].concat(FEATURE_CATS).map(c => { const o = el("option", null, c || "（未分类）"); o.value = c; return o; }));
-  $("#a-style").replaceChildren(...[""].concat(STYLES).map(c => { const o = el("option", null, c || "（未选）"); o.value = c; return o; }));
-  const box = $("#a-highlights");
-  HIGHLIGHTS.forEach((h, i) => { const lb = el("label"); lb.htmlFor = "hl-" + i; const cb = el("input"); cb.type = "checkbox"; cb.id = "hl-" + i; cb.value = h; lb.append(cb, document.createTextNode(h)); box.append(lb); });
-}
+const TAG_KEYS = ["name", "feature", "fusion", "colors", "mood", "learn"];
+let tagPicker = null;
 let tagSave = null;
 function openTagForm({ title, tags, path, onSave, saveLabel }){
   $("#tagTitle").textContent = title;
   const p = $("#tagPreview"); p.replaceChildren(); if (path) { p.append(imgEl(path)); hydrate(p); }
   TAG_KEYS.forEach(k => $("#a-" + k).value = tags?.[k] || "");
-  document.querySelectorAll("#a-highlights input").forEach(cb => cb.checked = (tags?.highlights || []).includes(cb.value));
+  tagPicker = catPicker($("#tagCats")); tagPicker.set(tags || {});
   showErr($("#tagErr"), ""); $("#tagSave").disabled = false; $("#tagSave").textContent = saveLabel || "保存";
   tagSave = onSave; $("#tagDlg").showModal();
 }
@@ -396,7 +505,7 @@ $("#tagCancel").onclick = () => $("#tagDlg").close();
 $("#tagForm").onsubmit = async e => {
   e.preventDefault();
   const t = {}; TAG_KEYS.forEach(k => t[k] = $("#a-" + k).value.trim());
-  t.highlights = [...document.querySelectorAll("#a-highlights input:checked")].map(c => c.value);
+  Object.assign(t, tagPicker.get());
   if (!t.name) return showErr($("#tagErr"), "请填写名字。");
   $("#tagSave").disabled = true;
   try { await tagSave(t); $("#tagDlg").close(); }

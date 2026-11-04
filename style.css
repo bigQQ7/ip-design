@@ -132,3 +132,13 @@ dialog::backdrop{background:rgba(10,12,20,.55)}
 .dlg-foot{padding:0 18px 18px;display:flex;justify-content:flex-end}
 .tagform{padding:18px}
 #tagPreview img{max-height:180px;border-radius:8px}
+
+.chip-add{background:transparent;border:1px dashed var(--line);color:var(--accent)}
+.chip-danger{background:var(--fail-soft)!important;color:var(--fail)!important;border-color:var(--fail)!important}
+#filters .link{align-self:flex-start;font-size:13px}
+#tagCats .field,#upCats .field{margin-top:12px}
+#tagCats .chips,#upCats .chips{margin-top:2px}
+.thumbs{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;max-height:220px;overflow:auto}
+.thumb{position:relative}
+.thumb img{width:72px;height:72px;object-fit:cover;object-position:top;border-radius:8px;background:var(--sunk);display:block}
+.thumb-x{position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;border:0;background:var(--fg);color:var(--bg);cursor:pointer;font-size:13px;line-height:22px;padding:0}
