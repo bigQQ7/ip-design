@@ -117,6 +117,12 @@
           <span class="note" style="margin:0">选中「案例图片-base.zip」解压后的 r01.jpg～r78.jpg，一次全选即可。</span>
         </div>
         <input type="file" id="baseFile" accept="image/jpeg" multiple hidden>
+        <div class="row" style="align-items:center">
+          <button class="btn ghost small" id="reviewExport" type="button">导出案例图片供复核</button>
+          <button class="btn ghost small" id="reviewImport" type="button">导入分类结果</button>
+          <input type="file" id="reviewFile" accept=".json,application/json" hidden>
+        </div>
+        <p class="note" id="reviewStatus" role="status"></p>
         <ul class="prog" id="bulkProg"></ul>
       </div>
     </div>
@@ -225,8 +231,22 @@
   </form>
 </dialog>
 
+<dialog id="reviewImportDlg">
+  <div class="tagform">
+    <h2 class="h-first">核对分类改动</h2>
+    <p class="note">确认后只更新列出的案例的「主特征（具体描述）」。</p>
+    <ul id="reviewChanges"></ul>
+    <p class="note" id="reviewImportStatus" role="status"></p>
+    <div class="row end">
+      <button class="btn ghost" id="reviewClose" type="button">关闭</button>
+      <button class="btn" id="reviewApply" type="button">确认保存</button>
+    </div>
+  </div>
+</dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=5"></script>
-<script src="app.js?v=8"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

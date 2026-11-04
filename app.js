@@ -453,6 +453,121 @@ function renderLib(){
   list.forEach(r => g.append(refCard(r)));
   hydrate(g);
 }
+/* ---------------- 管理员批量复核 ---------------- */
+const reviewStatus = $("#reviewStatus");
+const reviewDialog = $("#reviewImportDlg");
+const reviewFile = $("#reviewFile");
+let reviewChanges = [];
+
+$("#reviewExport").onclick = async () => {
+  if (!isAdmin) return;
+  const button = $("#reviewExport");
+  button.disabled = true;
+  try {
+    const cases = refs.filter(r => r.image_path);
+    if (!cases.length) { reviewStatus.textContent = "案例库里没有可导出的图片。"; return; }
+    const zip = new JSZip();
+    const manifest = [];
+    const skipped = [];
+    for (const [i, r] of cases.entries()) {
+      reviewStatus.textContent = "正在导出 " + (i + 1) + " / " + cases.length;
+      try {
+        const { data, error } = await sb.storage.from("images").download(r.image_path);
+        if (error || !data?.size) throw new Error("图片无法下载");
+        const ext = r.image_path.match(/\.([a-z0-9]{1,8})$/i)?.[1] || "img";
+        const file = "images/" + r.id + "." + ext;
+        zip.file(file, data);
+        manifest.push({ id: r.id, name: r.name, file, feature: r.feature, feature_cat: r.feature_cat, fusion: r.fusion });
+      } catch {
+        skipped.push(r.name);
+      }
+    }
+    if (!manifest.length) throw new Error("图片无法下载");
+    zip.file("cases.json", JSON.stringify({ version: 1, cases: manifest, skipped }, null, 2));
+    const url = URL.createObjectURL(await zip.generateAsync({ type: "blob" }));
+    const link = el("a");
+    link.href = url;
+    link.download = "案例图片-分类复核.zip";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    reviewStatus.textContent = "已导出 " + manifest.length + " 个案例。" +
+      (skipped.length ? " " + skipped.length + " 张下载失败，名单在压缩包内。" : "");
+  } catch {
+    reviewStatus.textContent = "导出失败，请刷新页面后重试。";
+  } finally {
+    button.disabled = false;
+  }
+};
+
+$("#reviewImport").onclick = () => { if (isAdmin) reviewFile.click(); };
+reviewFile.onchange = async () => {
+  const file = reviewFile.files[0];
+  reviewFile.value = "";
+  if (!isAdmin || !file) return;
+  try {
+    const payload = JSON.parse(await file.text());
+    if (payload.version !== 1 || !Array.isArray(payload.changes) || !payload.changes.length) throw new Error();
+    const byId = new Map(refs.map(r => [r.id, r]));
+    const seen = new Set();
+    const preview = $("#reviewChanges");
+    preview.replaceChildren();
+    reviewChanges = [];
+    for (const change of payload.changes) {
+      if (!change || typeof change.id !== "string" || seen.has(change.id) ||
+          !(change.before === null || typeof change.before === "string") ||
+          typeof change.after !== "string") throw new Error();
+      seen.add(change.id);
+      const r = byId.get(change.id);
+      const label = r?.name || change.id;
+      const after = change.after.trim();
+      if (!r || r.feature !== change.before) {
+        preview.append(el("li", null, label + "：案例不存在或描述已更新，跳过。"));
+      } else if (r.feature !== after) {
+        const row = el("li", null, label);
+        row.append(el("div", null, "原描述：" + (r.feature || "（空）")),
+          el("div", null, "新描述：" + (after || "（空）")));
+        preview.append(row);
+        reviewChanges.push({ ...change, after, row });
+      }
+    }
+    $("#reviewApply").disabled = !reviewChanges.length;
+    $("#reviewImportStatus").textContent = reviewChanges.length + " 条可以保存。";
+    reviewDialog.showModal();
+  } catch {
+    reviewStatus.textContent = "无法读取分类结果，请选择有效的分类 JSON 文件。";
+  }
+};
+
+$("#reviewClose").onclick = () => reviewDialog.close();
+reviewDialog.addEventListener("cancel", e => {
+  if ($("#reviewClose").disabled) e.preventDefault();
+});
+$("#reviewApply").onclick = async () => {
+  if (!isAdmin || !reviewChanges.length) return;
+  $("#reviewApply").disabled = $("#reviewClose").disabled = true;
+  let saved = 0;
+  try {
+    for (const change of reviewChanges) {
+      try {
+        const update = sb.from("refs").update({ feature: change.after }).eq("id", change.id);
+        const guarded = change.before === null ? update.is("feature", null) : update.eq("feature", change.before);
+        const { data, error } = await guarded.select("id").maybeSingle();
+        if (error || !data) throw new Error();
+        change.row.append(el("div", null, "已保存"));
+        saved++;
+      } catch {
+        change.row.append(el("div", null, "未保存，案例可能已被更新。"));
+      }
+    }
+    $("#reviewImportStatus").textContent = "已保存 " + saved + " / " + reviewChanges.length + " 条。";
+    await loadRefs();
+    renderLib();
+  } finally {
+    reviewChanges = [];
+    $("#reviewClose").disabled = false;
+  }
+};
+
 function openRef(r){
   const body = $("#dlgBody"); body.replaceChildren();
   const im = imgEl(r.image_path, r.name);
