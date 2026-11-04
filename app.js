@@ -375,14 +375,10 @@ function catPicker(root){
 function refCard(r, why){
   const b = el("button", "card"); b.type = "button";
   const ph = el("div", "ph"); ph.append(imgEl(r.image_path, r.name));
-  const bd = el("div", "bd");
-  bd.append(el("div", "nm", r.name), el("div", "mt", [r.species, r.feature, r.style].filter(Boolean).join(" · ")));
-  const hl = el("div", "hl");
-  (r.highlights || []).forEach(h => hl.append(el("span", null, h)));
-  if (isAdmin && uncategorized(r)) hl.append(el("span", "unc", "未分类"));
-  if (hl.childNodes.length) bd.append(hl);
-  if (why) bd.append(el("div", "why", why));
-  b.append(ph, bd);
+  b.title = r.name; b.setAttribute("aria-label", r.name);
+  if (isAdmin && uncategorized(r)) ph.append(el("span", "unc-badge", "未分类"));
+  b.append(ph);
+  if (why) { const bd = el("div", "bd"); bd.append(el("div", "why", why)); b.append(bd); }
   b.onclick = () => openRef(r);
   return b;
 }
