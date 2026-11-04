@@ -380,12 +380,13 @@ function saveRatios(){ clearTimeout(ratioTimer); ratioTimer = setTimeout(() => {
 function applyRatio(card, r){
   const c = Math.min(2.4, Math.max(0.6, r || 1));
   card.style.flex = c + " 1 calc(var(--row) * " + c + ")";
-  card.querySelector(".ph").style.aspectRatio = String(c);
+  const ph = card.querySelector(".ph"); if (ph) ph.style.aspectRatio = String(c);
   const im = card.querySelector("img"); if (im) im.style.objectPosition = r < 0.6 ? "top center" : "center";
 }
 function refCard(r, why){
   const b = el("button", "card"); b.type = "button";
   const ph = el("div", "ph"); ph.append(imgEl(r.image_path, r.name));
+  b.append(ph);
   b.title = r.name; b.setAttribute("aria-label", r.name);
   if (!why) {
     b.classList.add("tile");
@@ -397,7 +398,6 @@ function refCard(r, why){
     });
   }
   if (isAdmin && uncategorized(r)) ph.append(el("span", "unc-badge", "未分类"));
-  b.append(ph);
   if (why) { const bd = el("div", "bd"); bd.append(el("div", "why", why)); b.append(bd); }
   b.onclick = () => openRef(r);
   return b;
