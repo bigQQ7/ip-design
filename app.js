@@ -288,7 +288,6 @@ const FACETS = [
   { key: "hl", dim: "hl", label: "亮点", opts: () => CATS.hl, match: (r, v) => (r.highlights || []).includes(v) },
   { key: "feature", dim: "feature", label: "主特征", opts: () => CATS.feature, match: (r, v) => r.feature_cat === v || (FEAT_KW[v] || [v]).some(k => ((r.feature || "") + (r.fusion || "")).includes(k)) },
   { key: "shape", dim: "shape", label: "造型特点", opts: () => shapeCats, match: matchesShape },
-  { key: "style", dim: "style", label: "风格", opts: () => CATS.style, match: (r, v) => (r.style || "").includes(v) },
   { key: "species", dim: "species", label: "物种", opts: () => CATS.species, match: (r, v) => (r.species || "").includes(v) },
   { key: "src", label: "来源", admin: true, opts: ["教学组原始库", "学生推荐", "老师上传", "未分类"], match: (r, v) => v === "未分类" ? uncategorized(r) : v === "学生推荐" ? !!r.from_user : v === "老师上传" ? (!r.is_base && !r.from_user) : r.is_base }
 ];
