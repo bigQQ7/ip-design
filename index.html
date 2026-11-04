@@ -6,7 +6,7 @@
 <title>IP造型诊断台</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=ZCOOL+QingKe+HuangYou&family=JetBrains+Mono:wght@500&display=swap">
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 
@@ -102,8 +102,8 @@
   <section id="view-lib" hidden>
     <div class="panel">
       <div class="lib-tools">
-        <input type="search" id="q" placeholder="搜索名字、物种、特征，如：兔、耳朵、帽子">
         <span class="count" id="libCount"></span>
+        <input type="search" id="q" aria-label="搜索案例" placeholder="搜索名字、物种、特征，如：兔 大耳朵">
       </div>
       <div class="filters" id="filters"></div>
       <div class="addbox" id="addWrap" hidden>
@@ -199,7 +199,7 @@
     <label class="field" for="a-name">名字<input id="a-name" required></label>
     <div id="tagCats"></div>
     <label class="field" for="a-mood">表情<input id="a-mood" placeholder="不屑、犯困、开心…"></label>
-    <label class="field" for="a-feature">主特征（具体描述）<input id="a-feature" placeholder="超大圆耳、黄色蘑菇帽…"></label>
+    <label class="field" for="a-feature">主特征（具体描述）<input id="a-feature" placeholder="大耳朵、小脸、黄色蘑菇帽…"></label>
     <label class="field" for="a-fusion">跨界元素<input id="a-fusion" placeholder="葡萄、高压锅；没有写 无"></label>
     <label class="field" for="a-colors">配色<input id="a-colors" placeholder="灰白主色+橙红围巾点缀"></label>
     <label class="field" for="a-learn">借鉴点<textarea id="a-learn" rows="2"></textarea></label>
@@ -227,6 +227,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=5"></script>
-<script src="app.js?v=5"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

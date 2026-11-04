@@ -81,7 +81,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .pill.pass{background:var(--pass-soft);color:var(--pass)} .pill.fail{background:var(--fail-soft);color:var(--fail)} .pill.warn{background:var(--warn-soft);color:var(--warn)} .pill.idle{color:var(--idle);border:1px solid var(--line)}
 
 /* 案例库 */
-.lib-tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.lib-tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.lib-tools input{margin-inline-start:auto}
 .lib-tools input{font:15px var(--f-body);border:1px solid var(--line);border-radius:10px;padding:9px 12px;background:var(--surface);color:var(--fg);min-width:0;flex:1 1 220px;max-width:360px}
 .filters{display:flex;flex-direction:column;gap:8px;margin-top:12px}
 .filters .lbl{font-size:12px;color:var(--muted);letter-spacing:.06em;margin-right:4px}

@@ -270,9 +270,19 @@ async function loadRefs(){
 }
 const uncategorized = r => !r.feature_cat && !(r.highlights || []).length;
 const FEAT_KW = { "帽子/头饰": ["帽", "头饰", "头套"], "头顶元素": ["头顶"] };
+const SHAPE_TERMS = {
+  "大耳朵": /大(?:圆|尖|垂)?耳/,
+  "小耳朵": /小(?:圆|尖|垂)?耳/,
+  "大脸": /大(?:圆|方)?脸/,
+  "小脸": /小(?:圆|方)?脸/
+};
+function matchesShape(r, term){
+  return [r.feature, r.feature_cat, r.fusion].some(value => SHAPE_TERMS[term].test(value || ""));
+}
 const FACETS = [
   { key: "hl", dim: "hl", label: "亮点", opts: () => CATS.hl, match: (r, v) => (r.highlights || []).includes(v) },
   { key: "feature", dim: "feature", label: "主特征", opts: () => CATS.feature, match: (r, v) => r.feature_cat === v || (FEAT_KW[v] || [v]).some(k => ((r.feature || "") + (r.fusion || "")).includes(k)) },
+  { key: "shape", label: "造型特点", opts: Object.keys(SHAPE_TERMS), match: matchesShape },
   { key: "style", dim: "style", label: "风格", opts: () => CATS.style, match: (r, v) => (r.style || "").includes(v) },
   { key: "species", dim: "species", label: "物种", opts: () => CATS.species, match: (r, v) => (r.species || "").includes(v) },
   { key: "src", label: "来源", admin: true, opts: ["教学组原始库", "学生推荐", "老师上传", "未分类"], match: (r, v) => v === "未分类" ? uncategorized(r) : v === "学生推荐" ? !!r.from_user : v === "老师上传" ? (!r.is_base && !r.from_user) : r.is_base }
@@ -406,7 +416,7 @@ function renderLib(){
   const q = $("#q").value.trim();
   const list = refs.filter(r => {
     const hay = [r.name, r.species, r.fusion, r.feature, r.feature_cat, r.colors, r.style, r.mood, r.learn, (r.highlights || []).join(" ")].join(" ");
-    if (q && !q.split(/\s+/).every(w => hay.includes(w))) return false;
+    if (q && !q.split(/\s+/).every(w => hay.includes(w) || (Object.hasOwn(SHAPE_TERMS, w) && matchesShape(r, w)))) return false;
     return FACETS.every(F => !active[F.key] || F.match(r, active[F.key]));
   });
   $("#libCount").textContent = list.length + " / " + refs.length + " 个案例";
