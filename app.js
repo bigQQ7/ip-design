@@ -10,7 +10,7 @@ function screen(name){ SCREENS.forEach(s => $("#screen-" + s).hidden = s !== nam
 function showErr(node, msg){ node.textContent = msg; node.hidden = !msg; }
 
 /* 分类：从数据库读取，管理员可以新建、删除 */
-const DIMS = { hl: "亮点", feature: "主特征", style: "风格", species: "物种" };
+const DIMS = { hl: "亮点", feature: "主特征", style: "风格", species: "物种", shape: "造型特点" };
 let CATS = {
   hl: ["五官表情", "剪影", "融合创意", "配色", "比例体型"],
   feature: ["耳朵", "头型", "帽子/头饰", "头顶元素", "尾巴", "嘴", "角", "表情", "体型", "发型"],
@@ -276,13 +276,18 @@ const SHAPE_TERMS = {
   "大脸": /大(?:圆|方)?脸/,
   "小脸": /小(?:圆|方)?脸/
 };
+// Store shape options in the existing feature dimension, which has admin-only writes.
+const SHAPE_PREFIX = "造型特点：";
+let shapeCats = Object.keys(SHAPE_TERMS);
 function matchesShape(r, term){
-  return [r.feature, r.feature_cat, r.fusion].some(value => SHAPE_TERMS[term].test(value || ""));
+  const pattern = Object.hasOwn(SHAPE_TERMS, term) ? SHAPE_TERMS[term] : null;
+  return [r.feature, r.feature_cat, r.fusion].some(value =>
+    pattern ? pattern.test(value || "") : (value || "").includes(term));
 }
 const FACETS = [
   { key: "hl", dim: "hl", label: "亮点", opts: () => CATS.hl, match: (r, v) => (r.highlights || []).includes(v) },
   { key: "feature", dim: "feature", label: "主特征", opts: () => CATS.feature, match: (r, v) => r.feature_cat === v || (FEAT_KW[v] || [v]).some(k => ((r.feature || "") + (r.fusion || "")).includes(k)) },
-  { key: "shape", label: "造型特点", opts: Object.keys(SHAPE_TERMS), match: matchesShape },
+  { key: "shape", dim: "shape", label: "造型特点", opts: () => shapeCats, match: matchesShape },
   { key: "style", dim: "style", label: "风格", opts: () => CATS.style, match: (r, v) => (r.style || "").includes(v) },
   { key: "species", dim: "species", label: "物种", opts: () => CATS.species, match: (r, v) => (r.species || "").includes(v) },
   { key: "src", label: "来源", admin: true, opts: ["教学组原始库", "学生推荐", "老师上传", "未分类"], match: (r, v) => v === "未分类" ? uncategorized(r) : v === "学生推荐" ? !!r.from_user : v === "老师上传" ? (!r.is_base && !r.from_user) : r.is_base }
@@ -293,21 +298,44 @@ async function loadCats(){
   const { data, error } = await sb.from("categories").select("dim,name,sort,created_at").order("sort").order("created_at");
   if (error || !data || !data.length) return;
   const c = { hl: [], feature: [], style: [], species: [] };
-  data.forEach(r => { if (c[r.dim]) c[r.dim].push(r.name); });
+  const storedShapes = new Map();
+  data.forEach(r => {
+    if (r.dim === "feature" && r.name.startsWith(SHAPE_PREFIX)) {
+      storedShapes.set(r.name.slice(SHAPE_PREFIX.length), r.sort);
+    } else if (c[r.dim]) {
+      c[r.dim].push(r.name);
+    }
+  });
+  shapeCats = [...new Set([...Object.keys(SHAPE_TERMS), ...storedShapes.keys()])]
+    .filter(name => storedShapes.get(name) !== -1);
   CATS = c;
 }
 async function addCat(dim){
   const name = (prompt("新建「" + DIMS[dim] + "」分类，输入名称：") || "").trim();
   if (!name) return null;
-  if (CATS[dim].includes(name)) return name;
-  const { error } = await sb.from("categories").insert({ dim, name, sort: CATS[dim].length });
+  const options = dim === "shape" ? shapeCats : CATS[dim];
+  if (dim === "feature" && name.startsWith(SHAPE_PREFIX)) {
+    alert("请在「造型特点」一栏新增这个分类。");
+    return null;
+  }
+  if (options.includes(name)) return name;
+  const { error } = dim === "shape"
+    ? await sb.from("categories").upsert({ dim: "feature", name: SHAPE_PREFIX + name, sort: options.length }, { onConflict: "dim,name" })
+    : await sb.from("categories").insert({ dim, name, sort: options.length });
   if (error) { alert("添加没有成功，请再试一次。"); return null; }
-  CATS[dim].push(name); buildFilters();
+  options.push(name); buildFilters();
   return name;
 }
 async function delCat(dim, name){
-  const { error } = await sb.from("categories").delete().eq("dim", dim).eq("name", name);
-  if (!error) CATS[dim] = CATS[dim].filter(x => x !== name);
+  const dbDim = dim === "shape" ? "feature" : dim;
+  const dbName = dim === "shape" ? SHAPE_PREFIX + name : name;
+  const { error } = dim === "shape" && Object.hasOwn(SHAPE_TERMS, name)
+    ? await sb.from("categories").upsert({ dim: dbDim, name: dbName, sort: -1 }, { onConflict: "dim,name" })
+    : await sb.from("categories").delete().eq("dim", dbDim).eq("name", dbName);
+  if (error) { alert("删除没有成功，请再试一次。"); return false; }
+  if (dim === "shape") shapeCats = shapeCats.filter(x => x !== name);
+  else CATS[dim] = CATS[dim].filter(x => x !== name);
+  return true;
 }
 function buildFilters(){
   const f = $("#filters"); f.replaceChildren();
@@ -324,7 +352,8 @@ function buildFilters(){
       c.onclick = async () => {
         if (manageCats && F.dim) {
           if (!c.dataset.armed) { c.dataset.armed = "1"; c.textContent = "删除「" + o + "」？再点一次"; c.classList.add("chip-danger"); return; }
-          await delCat(F.dim, o); if (active[F.key] === o) active[F.key] = null; buildFilters(); renderLib(); return;
+          if (!await delCat(F.dim, o)) return;
+          if (active[F.key] === o) active[F.key] = null; buildFilters(); renderLib(); return;
         }
         active[F.key] = active[F.key] === o ? null : o; buildFilters(); renderLib();
       };
