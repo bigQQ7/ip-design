@@ -294,6 +294,7 @@ const SHAPE_TERMS = {
   "轻微鼓腮": /轻微鼓腮|小腮/,
   "腮不明显": /腮不明显/,
   "半遮眼": /半遮眼|半遮掩/,
+  "无眼睛": /无眼睛|没眼睛/,
   "大嘴": /大嘴|大鸭嘴/
 };
 // Store shape options in the existing feature dimension, which has admin-only writes.
