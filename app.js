@@ -711,6 +711,8 @@ $("#reviewApply").onclick = async () => {
 let detailCases = [];
 let detailIndex = -1;
 let detailBusy = false;
+let detailWheelAt = 0;
+let detailWheelDistance = 0;
 function moveDetail(step){
   if (detailBusy) return;
   const next = detailIndex + step;
@@ -858,6 +860,18 @@ function drawRef(r){
 }
 $("#dlgClose").onclick = () => { if (!detailBusy) $("#dlg").close(); };
 $("#dlg").addEventListener("cancel", event => { if (detailBusy) event.preventDefault(); });
+$("#dlg").addEventListener("wheel", event => {
+  if (Math.abs(event.deltaX) <= Math.abs(event.deltaY) || event.ctrlKey) return;
+  event.preventDefault();
+  const now = Date.now();
+  if (now - detailWheelAt < 600 || detailBusy) return;
+  detailWheelDistance += event.deltaX;
+  if (Math.abs(detailWheelDistance) > 90) {
+    moveDetail(detailWheelDistance > 0 ? 1 : -1);
+    detailWheelDistance = 0;
+    detailWheelAt = now;
+  }
+}, { passive: false });
 $("#dlg").addEventListener("keydown", event => {
   if (event.target.matches("input,textarea,select")) return;
   if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
