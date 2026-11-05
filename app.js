@@ -13,7 +13,7 @@ function showErr(node, msg){ node.textContent = msg; node.hidden = !msg; }
 const DIMS = { hl: "亮点", feature: "主特征", style: "风格", species: "物种", shape: "造型特点" };
 let CATS = {
   hl: ["五官表情", "剪影", "融合创意", "配色", "比例体型"],
-  feature: ["耳朵", "头型", "帽子/头饰", "头顶元素", "尾巴", "嘴", "角", "表情", "体型", "发型"],
+  feature: ["耳朵", "头型", "帽子/头饰", "头顶元素", "尾巴", "嘴", "角", "眼睛", "腮帮子", "体型", "发型"],
   style: ["3D软胶", "2D平面", "娃系"],
   species: ["兔", "猫", "熊", "狗", "考拉", "狐狸", "羊", "鸭", "小怪", "蘑菇"]
 };
@@ -270,11 +270,29 @@ async function loadRefs(){
 }
 const uncategorized = r => !r.feature_cat && !r.feature && !r.species;
 const FEAT_KW = { "帽子/头饰": ["帽", "头饰", "头套"], "头顶元素": ["头顶"] };
+const CASE_TYPES = ["可爱", "潮酷", "真人像盲盒"];
+function normalizeFeature(name){
+  if (["表情", "眼睛表情", "眼睛/表情", "眼型", "眼睛／表情"].includes(name)) return "眼睛";
+  return name;
+}
+function normalizeShape(name){
+  if (["豆豆眼", "小豆豆眼", "小眼", "小眼睛/豆豆眼"].includes(name)) return "小眼睛";
+  if (["含情脉脉眼", "大眼", "含情眼"].includes(name)) return "大眼睛";
+  return name;
+}
+function featureOptions(options){
+  return [...new Set([...options.map(normalizeFeature), "眼睛", "腮帮子"])];
+}
 const SHAPE_TERMS = {
   "大耳朵": /大(?:圆|尖|垂)?耳/,
   "小耳朵": /小(?:圆|尖|垂)?耳/,
   "大脸": /大(?:圆|方)?脸/,
-  "小脸": /小(?:圆|方)?脸/
+  "小脸": /小(?:圆|方)?脸/,
+  "小眼睛": /小眼|豆豆眼/,
+  "大眼睛": /大眼|含情脉脉眼/,
+  "明显鼓腮": /明显鼓腮|大腮/,
+  "轻微鼓腮": /轻微鼓腮|小腮/,
+  "腮不明显": /腮不明显/
 };
 // Store shape options in the existing feature dimension, which has admin-only writes.
 const SHAPE_PREFIX = "造型特点：";
@@ -282,11 +300,13 @@ let shapeCats = Object.keys(SHAPE_TERMS);
 const SHAPE_PARENT_PREFIX = "造型归属：";
 const shapeParents = new Map();
 function shapeParent(name){
+  if (/腮|脸颊/.test(name)) return "腮帮子";
+  if (/眼|眉/.test(name)) return "眼睛";
   if (shapeParents.has(name)) return shapeParents.get(name);
   if (name.includes("耳")) return "耳朵";
   if (/脸|头型/.test(name)) return "头型";
   if (/嘴|口|喙/.test(name)) return "嘴";
-  if (/眼|眉|表情/.test(name)) return "表情";
+  if (/表情/.test(name)) return null;
   if (/尾/.test(name)) return "尾巴";
   if (/角/.test(name)) return "角";
   if (/发/.test(name)) return "发型";
@@ -295,7 +315,7 @@ function shapeParent(name){
   return null;
 }
 function matchesFeature(r, parent){
-  return r.feature_cat === parent ||
+  return normalizeFeature(r.feature_cat) === parent ||
     (FEAT_KW[parent] || [parent]).some(k => ((r.feature || "") + (r.fusion || "")).includes(k)) ||
     shapeCats.some(tag => shapeParent(tag) === parent && matchesShape(r, tag));
 }
@@ -319,12 +339,13 @@ function featureDescription(r){
 }
 function matchesShape(r, term){
   const selected = shapeSelection(r);
-  if (selected) return selected.includes(term);
+  if (selected) return selected.map(normalizeShape).includes(term);
   const pattern = Object.hasOwn(SHAPE_TERMS, term) ? SHAPE_TERMS[term] : null;
   return [r.feature, r.feature_cat, r.fusion].some(value =>
     pattern ? pattern.test(value || "") : (value || "").includes(term));
 }
 const FACETS = [
+  { key: "type", label: "大类", opts: CASE_TYPES, match: (r, value) => r.style === value },
   { key: "feature", dim: "feature", label: "主特征", opts: () => CATS.feature, match: matchesFeature },
   { key: "shape", dim: "shape", label: "造型特点", opts: () => shapeCats.filter(tag => shapeParent(tag) === active.feature), match: matchesShape },
   { key: "species", dim: "species", label: "物种", opts: () => CATS.species, match: (r, v) => (r.species || "").includes(v) },
@@ -352,13 +373,16 @@ async function loadCats(){
   });
   shapeCats = [...new Set([...Object.keys(SHAPE_TERMS), ...storedShapes.keys()])]
     .filter(name => storedShapes.get(name) !== -1);
+  c.feature = featureOptions(c.feature);
+  shapeCats = [...new Set(shapeCats.map(normalizeShape))];
   CATS = c;
 }
 async function addCat(dim){
   const parent = dim === "shape" ? active.feature : null;
   if (dim === "shape" && !parent) return null;
-  const name = (prompt("新建「" + DIMS[dim] + "」分类，输入名称：") || "").trim();
-  if (!name) return null;
+  const enteredName = (prompt("新建「" + DIMS[dim] + "」分类，输入名称：") || "").trim();
+  if (!enteredName) return null;
+  const name = dim === "shape" ? normalizeShape(enteredName) : dim === "feature" ? normalizeFeature(enteredName) : enteredName;
   const options = dim === "shape" ? shapeCats : CATS[dim];
   if (dim === "feature" && (name.startsWith(SHAPE_PREFIX) || name.startsWith(SHAPE_PARENT_PREFIX))) {
     alert("请在「造型特点」一栏新增这个分类。");
@@ -456,7 +480,7 @@ function catPicker(root){
   make("feature", "主特征分类", false); make("species", "物种", true);
   return {
     set(t){
-      groups.feature.sel = new Set(t?.feature_cat ? [t.feature_cat] : []);
+      groups.feature.sel = new Set(t?.feature_cat ? [normalizeFeature(t.feature_cat)] : []);
       groups.species.sel = new Set((t?.species || "").split(/[、,，]/).map(s => s.trim()).filter(Boolean));
       Object.values(groups).forEach(g => g.draw());
     },
@@ -485,7 +509,7 @@ function updateBatchCount(){
 }
 function loadBatchValues(){
   const field = $("#batchField").value;
-  const options = field === "feature" ? shapeCats : ["", ...CATS[field === "feature_cat" ? "feature" : "species"]];
+  const options = field === "feature" ? shapeCats : field === "style" ? ["", ...CASE_TYPES] : ["", ...CATS[field === "feature_cat" ? "feature" : "species"]];
   $("#batchValue").replaceChildren(...options.map(value => {
     const option = el("option", null, value || "清除分类");
     option.value = value;
@@ -543,7 +567,7 @@ function refCard(r, why, inLibrary = false){
   if (why) { const bd = el("div", "bd"); bd.append(el("div", "why", why)); b.append(bd); }
   if (inLibrary) {
     const shapes = shapeCats.filter(tag => matchesShape(r, tag));
-    const labels = [...new Set([...shapes, r.feature_cat, ...(r.species || "").split("、")].filter(Boolean))];
+    const labels = [...new Set([...(CASE_TYPES.includes(r.style) ? [r.style] : []), ...shapes, normalizeFeature(r.feature_cat), ...(r.species || "").split("、")].filter(Boolean))];
     if (labels.length) {
       const tags = el("div", "preview-tags");
       labels.forEach(label => tags.append(el("span", null, label)));
@@ -653,7 +677,7 @@ reviewFile.onchange = async () => {
 };
 
 function previewReview(changes, field){
-  const labels = { feature: "主特征（具体描述）", feature_cat: "主特征分类", species: "物种" };
+  const labels = { feature: "主特征（具体描述）", feature_cat: "主特征分类", species: "物种", style: "大类" };
   const byId = new Map(refs.map(r => [r.id, r]));
   const preview = $("#reviewChanges");
   preview.replaceChildren();
@@ -708,6 +732,12 @@ $("#reviewApply").onclick = async () => {
   }
 };
 
+const REVIEW_SUGGESTIONS = {"b00a3234-cad5-4fcb-ba6d-3d7440cbb3c5":{"type":"可爱","tags":[]},"96cbb0ff-6840-4c7c-9b0a-00fb5b8c3a12":{"type":"可爱","tags":[]},"ea92d33d-2624-4abd-a755-4c16d12134f5":{"type":null,"tags":["小眼睛"]},"ca58f3c5-8541-4b67-9331-f6a84e570f5f":{"type":"可爱","tags":["小眼睛"]},"3e666d7a-33d8-47e1-9596-3d84ce7aee8b":{"type":"可爱","tags":[]},"d9a15857-7006-43be-879a-da5bf829b778":{"type":"可爱","tags":[]},"5d162e1f-dac0-4dc8-9b99-24bbd90c4266":{"type":"可爱","tags":[]},"cd076109-94bc-4d58-a8a5-45bb81b8ecf3":{"type":"可爱","tags":["小眼睛"]},"bd9afecc-074b-4b6b-bac3-c8fa98ec46ec":{"type":"可爱","tags":[]},"a6c92724-840b-45ca-818e-93411051962e":{"type":"可爱","tags":["小眼睛"]},"11e84976-e33a-4972-807d-69f8ef2d7ff1":{"type":"可爱","tags":["大眼睛"]},"610cc3e9-b97d-4290-b314-c8c0dbbdd154":{"type":"可爱","tags":["小眼睛"]},"c037fdb7-f57a-4f3a-bc61-25376006272e":{"type":"可爱","tags":[]},"830018f2-40ce-41ad-8d3f-a61843b4b6c9":{"type":"可爱","tags":[]},"c85b8532-d31a-4439-9ff2-ee23ce156249":{"type":null,"tags":[]},"c9406b55-c8f7-47d6-a40d-06a5bcd108d2":{"type":"可爱","tags":[]},"84939b6f-b2ee-421a-8687-3328d19d1748":{"type":"可爱","tags":["小眼睛"]},"3945c0b5-062b-45d3-bffc-4d201ae7072a":{"type":"可爱","tags":[]},"90a582c2-c4db-4bfb-88a4-571f94fdf798":{"type":"可爱","tags":["小眼睛"]},"a20fa587-d95e-4ef7-8913-2597349a32ef":{"type":"可爱","tags":["小眼睛"]},"d969f03c-2b42-44da-80b4-3a96d6ef9f52":{"type":"可爱","tags":["小眼睛"]},"8f7d5df2-4f45-42b0-a420-a29acf10be85":{"type":"可爱","tags":[]},"bbffd5d7-c7d8-4ff9-bb35-5883521d0d54":{"type":"可爱","tags":["小眼睛"]},"2d1654ba-54e6-4eec-82c0-460a71125229":{"type":"真人像盲盒","tags":[]},"d92074f1-6541-4600-8ee2-127ebeab57da":{"type":"可爱","tags":["小眼睛"]},"7451b2ec-3dd0-40b2-895a-fff03dd357fe":{"type":null,"tags":[]},"1bdd5ba2-a085-4361-859f-8196765490a6":{"type":"可爱","tags":[]},"a66f46ed-de61-4acb-aac1-66d79ff11aae":{"type":null,"tags":[]},"4a16561f-9762-4314-9a95-815cc4819f6c":{"type":"可爱","tags":[]},"f51c9506-2f51-4051-884b-317715c3847b":{"type":"可爱","tags":[]},"45171815-4555-4b8c-bb16-7d4e587565fc":{"type":"可爱","tags":["小眼睛"]},"972345fa-5316-4e1e-9576-ab1355a181b3":{"type":"可爱","tags":[]},"019da32b-084e-496e-836e-cf57ab4a8558":{"type":"可爱","tags":["小眼睛"]},"8e744659-92bf-4b13-bd4a-9ad35c255757":{"type":"可爱","tags":[]},"f7ae18e2-7949-4710-94bb-6eb7e1e1af4c":{"type":"可爱","tags":[]},"831a633f-2a6d-4484-acd5-700b6602db06":{"type":null,"tags":[]},"d8ec14b7-a107-4aff-a264-ad001b4b143f":{"type":null,"tags":[]},"64778ae3-a372-443c-b1ea-bc9cc0e03918":{"type":null,"tags":[]},"6e58d50b-b710-4576-8e81-21929ac968e1":{"type":"可爱","tags":[]},"bc6955fc-840c-4e08-b1c0-855ad5fcb4c8":{"type":"真人像盲盒","tags":[]},"420b5e84-efcf-4e8d-80b3-dff2aa6a8f21":{"type":"可爱","tags":[]},"06161b6d-532b-4d9f-9e09-3216247d51c1":{"type":"可爱","tags":[]},"ccd31b73-38f2-4f8d-9a54-0fb667092f59":{"type":"可爱","tags":["明显鼓腮","小眼睛"]},"6bd2af85-0862-433f-97ee-bc2657c9c7d6":{"type":"可爱","tags":[]},"2be95944-bc6b-46da-a1ed-f7590da5d29e":{"type":"可爱","tags":["明显鼓腮"]},"d26ff2f9-b4f7-4e9b-9244-dcd899080e4e":{"type":"可爱","tags":[]},"9aacac7f-138a-4b01-9f09-1792361570eb":{"type":"可爱","tags":["大眼睛"]},"29efd91d-9796-4808-b545-5008f9d85abf":{"type":"可爱","tags":["小眼睛"]},"32a1044c-0073-45ee-b6eb-124c8366ecd5":{"type":"可爱","tags":["小眼睛"]},"77648bfa-78d2-4681-850d-9ac1588e15f8":{"type":null,"tags":[]},"94105aee-1319-4574-8c92-379186047ffe":{"type":"可爱","tags":["小眼睛"]},"b05aa024-931c-4460-84fc-ac2d35ed221e":{"type":"可爱","tags":["小眼睛"]},"a0d12937-90fc-4288-8b6f-5e6bedaa75aa":{"type":"可爱","tags":["明显鼓腮","大眼睛"]},"b7e63a84-5499-48e1-957e-7c02e10c670a":{"type":"可爱","tags":[]},"5237cef7-2820-4431-b677-2c1097d48ab0":{"type":"可爱","tags":["大眼睛"]},"cc21df2a-085b-424e-b782-b9a5ce7550d8":{"type":"可爱","tags":[]},"ebc65787-a490-4d1b-8436-a26249dbafa7":{"type":"可爱","tags":["小眼睛"]},"b45cac74-d846-4667-98e9-a890ae776ae4":{"type":null,"tags":[]},"9c53fd98-b484-44b4-9e2b-49870329d803":{"type":null,"tags":["大眼睛"]},"e5470c79-dba7-48ee-85ec-c8af3311d845":{"type":"可爱","tags":["大眼睛"]},"1268ae27-472f-4956-92b6-2faa0d053935":{"type":"可爱","tags":["大眼睛"]},"b6101837-f074-42d4-bb03-87fb254641b8":{"type":"可爱","tags":["小眼睛"]},"bd1e6686-29f7-4404-ab1c-ea0ef2107d92":{"type":null,"tags":[]},"29513f5f-d123-4770-ba6b-960eb2ed6b44":{"type":null,"tags":[]},"f60908a5-75a8-4fb5-a7c8-1fa4556e994a":{"type":"真人像盲盒","tags":[]},"8a3835c7-b91e-4968-8a45-506684c8a478":{"type":null,"tags":[]},"64602278-35d8-43a9-a58e-3fd0a3b16a26":{"type":null,"tags":[]},"bdd04810-fd12-4683-939b-ef8b858b3c3d":{"type":null,"tags":[]},"3292e289-d133-45bf-94d3-4a8b8f812b0a":{"type":"潮酷","tags":[]},"c7cf7ba5-2a24-488b-b2e9-500fb21ddc90":{"type":null,"tags":[]},"cec60cd2-a60e-424d-9f88-c6ab21f9c5c5":{"type":"可爱","tags":[]},"b967db22-7701-4670-9af3-ec7dfae3e6b6":{"type":"可爱","tags":[]},"37bf0d43-d3a4-40bc-b6ca-5669cb28e3e4":{"type":"可爱","tags":[]},"d9f6e3bd-09d6-444d-94c6-fc5d2cc35955":{"type":"可爱","tags":["小眼睛"]},"8b1a9922-d0fa-43f6-8fdb-d8c00294f570":{"type":"可爱","tags":[]},"0526e977-15cc-4e02-a7b2-1e909d9ecebe":{"type":null,"tags":[]},"a93a7f51-cff0-4274-af37-b66cb115381e":{"type":"可爱","tags":[]},"1efd92ff-7304-436b-83fd-d64158af4dac":{"type":null,"tags":[]},"13a1b6bd-1648-4adf-b2c9-fa642411707d":{"type":"可爱","tags":["小眼睛"]},"df5edcd3-c016-49be-8fbc-fe14dd86b3de":{"type":"可爱","tags":["明显鼓腮"]},"60948210-8fe3-45a0-8cf7-a988798fb28e":{"type":"可爱","tags":["小眼睛"]},"9db73e8e-9861-485b-b2e8-2f8098b87b8f":{"type":"可爱","tags":["小眼睛"]},"cdd1482d-2e9d-48e8-a3a3-1d2c4c10ae7b":{"type":"可爱","tags":["小眼睛"]},"8f2a0ba7-2027-4fb4-8f53-46f3b9bfa10a":{"type":null,"tags":[]},"9fc6e64d-fe9d-4711-bff8-bb07186f204b":{"type":"可爱","tags":["明显鼓腮","小眼睛"]},"24b1cf76-8dbb-4f03-a654-ff3f89a53020":{"type":"可爱","tags":["小眼睛"]},"eb820aab-580c-4fd5-ac08-cf868cf12769":{"type":"可爱","tags":["小眼睛"]},"be5c6361-c669-463e-ab14-6c7b0eeaecc4":{"type":"可爱","tags":["小眼睛"]},"a9440e45-33dd-4efc-8942-8ff060c8e640":{"type":"真人像盲盒","tags":[]},"5e7f27e6-bf9a-45b2-bc27-3fab580697a5":{"type":null,"tags":[]},"2bb55670-b41c-4039-8c76-3c4cfdb6b967":{"type":"可爱","tags":["明显鼓腮","大眼睛"]},"ace29ee4-fbb9-4c4d-9ba5-ce6613146e63":{"type":"可爱","tags":["明显鼓腮"]},"d2c10ea6-67a0-4a30-abe2-cc5f2f44aaf0":{"type":"可爱","tags":["大眼睛"]},"68b69265-6b1b-4a21-97ec-223403228469":{"type":"可爱","tags":["大眼睛"]},"a1f5c6ed-b58a-41ea-add2-bd189643535b":{"type":"可爱","tags":["小眼睛"]},"1bba2330-f679-4534-8e88-2c6137dc76d9":{"type":"可爱","tags":["小眼睛"]},"1c9055bb-ca11-43cf-a639-9307281fcd23":{"type":"可爱","tags":["小眼睛"]},"a6be0aca-431a-4707-b531-1ffa8bc582f5":{"type":null,"tags":[]},"a75bbd47-0676-4b92-947c-8158d778bee7":{"type":"可爱","tags":["小眼睛"]},"539683d3-93fa-41c5-b26a-ab645bb9d2b6":{"type":"可爱","tags":["明显鼓腮","小眼睛"]},"c63aa4d2-3a9e-46b7-a696-134d181aeb83":{"type":"可爱","tags":["小眼睛"]},"30725229-688d-4463-b674-bb8f48b3853b":{"type":"可爱","tags":["小眼睛"]},"a1aeda25-83b7-4439-a755-820c5fbf857c":{"type":"潮酷","tags":["大眼睛"]},"5213ecc7-7bab-4b54-b816-6e0352248ad9":{"type":"潮酷","tags":["大眼睛"]},"4a0771c4-19a6-44b0-a78d-0bce02cd2af7":{"type":"可爱","tags":["小眼睛"]},"1609fef2-64ac-4ef0-9e0d-f1048db393a8":{"type":"可爱","tags":["小眼睛"]},"5b9b818a-a4f4-45b4-81a0-0e80ebf79eee":{"type":"可爱","tags":["小眼睛"]},"37ad8a2c-42fe-4715-a618-2e2b9532e00d":{"type":"可爱","tags":["小眼睛"]},"6a5b0fcc-87ad-4c86-96ee-8aa5a0fd61e8":{"type":"可爱","tags":["小眼睛"]},"e1e4f1b7-ca0b-4df3-a813-7528ba106820":{"type":null,"tags":[]},"b88426ce-c88e-4f9c-b638-ef42bada9d66":{"type":"可爱","tags":["小眼睛"]},"f7bf88bb-fa16-4fe9-98a5-13766e51918f":{"type":"可爱","tags":[]},"b6ecb77d-5462-499b-8f6a-1ce18a2e318f":{"type":"可爱","tags":["小眼睛"]},"98784519-21bf-4801-a407-62c6778e5190":{"type":null,"tags":[]},"c6c78a42-b8dc-4107-82e0-851d4daea457":{"type":"可爱","tags":["小眼睛"]},"529ba26d-090a-4587-ab4f-5fcc7eb7de6e":{"type":"可爱","tags":["明显鼓腮"]},"e8c52867-ed5c-4ead-afb3-ffa421832ddb":{"type":"可爱","tags":["小眼睛"]},"22c7e9e5-4f44-47f1-bef6-567b1264ad3c":{"type":null,"tags":[]},"511f3f1f-7a5f-4ab5-b35b-3ca4255c4a4c":{"type":"可爱","tags":[]},"58a25a87-bde2-447a-a2e7-f758a39485ab":{"type":"潮酷","tags":["大眼睛"]},"58fe3e20-2084-48ef-905d-8ad770759b6b":{"type":"可爱","tags":["大眼睛"]},"87cbd009-ad7f-41df-9cc9-ff48bd051622":{"type":"可爱","tags":[]},"75f59397-91d6-4588-9085-244f7c5192f1":{"type":"可爱","tags":["明显鼓腮","小眼睛"]},"43d0769d-0621-4982-b208-d55a0aa91903":{"type":"可爱","tags":["明显鼓腮","小眼睛"]},"07511ee2-0d5b-40e5-8320-9840c03690a5":{"type":"可爱","tags":["小眼睛"]},"941422a4-a060-4c6c-8e09-78d7301e0713":{"type":"可爱","tags":["小眼睛"]},"26e23a73-544d-44c5-b630-39752618fb3d":{"type":"可爱","tags":["小眼睛"]},"5f3c5c93-5cc6-4379-8eb0-8b509903516e":{"type":"可爱","tags":["小眼睛"]},"34981aeb-7d5e-4eb1-a817-0cd305712f3d":{"type":"可爱","tags":["小眼睛"]},"eddb52e6-dd20-42ed-afea-b1816eef95c9":{"type":"可爱","tags":["小眼睛"]},"f1384883-49ec-44ef-b740-bb640a49ded0":{"type":"可爱","tags":["小眼睛"]},"9344382d-ad1c-4449-9d35-045aaffc6022":{"type":"潮酷","tags":["小眼睛"]},"71e6e0a3-b351-4e90-b9e1-1e1e4cc964d0":{"type":"潮酷","tags":["小眼睛"]},"63e83e8b-2d21-4f93-9904-d98cfe1867cd":{"type":"可爱","tags":["小眼睛"]},"e3ecfe6a-8102-42ee-bf1f-45711fda66ec":{"type":"可爱","tags":["小眼睛"]},"5b56ad59-5461-4c4b-b747-acadc97f88b2":{"type":"可爱","tags":["小眼睛"]},"75f5b28a-9aa4-430d-86f0-b72b7b3965a0":{"type":"可爱","tags":["小眼睛"]},"7a96c62e-160d-4071-b1f2-ad650a1e2b34":{"type":"可爱","tags":["明显鼓腮","小眼睛"]},"679094a0-f29d-4062-8ba6-cb7ec7736e66":{"type":"可爱","tags":["小眼睛"]},"c1ee960f-15f3-4f5d-b6d9-fa6288f277ba":{"type":"可爱","tags":["小眼睛"]},"a16e8f6a-aad4-4031-9420-a20ec09d2403":{"type":"可爱","tags":["明显鼓腮","小眼睛"]}};
+$("#reviewTaxonomy").onclick = () => {
+  if (!isAdmin) return;
+  const first = visibleCases.find(r => !CASE_TYPES.includes(r.style)) || visibleCases[0];
+  if (first) openRef(first);
+};
 let detailCases = [];
 let detailIndex = -1;
 let detailBusy = false;
@@ -784,18 +814,52 @@ function drawRef(r){
       });
       wrap.append(chips); controls.append(wrap);
     }
-    group("主特征", [...new Set([...CATS.feature, r.feature_cat].filter(Boolean))], [r.feature_cat], value =>
-      save({ feature_cat: r.feature_cat === value ? "" : value }));
+    group("大类", CASE_TYPES, [r.style], value => save({ style: r.style === value ? "" : value }));
+    group("主特征", featureOptions([...CATS.feature, r.feature_cat].filter(Boolean)), [normalizeFeature(r.feature_cat)], value =>
+      save({ feature_cat: normalizeFeature(r.feature_cat) === value ? "" : value }));
     const selectedShapes = shapeCats.filter(tag => matchesShape(r, tag));
-    const childOptions = shapeCats.filter(tag => shapeParent(tag) === r.feature_cat || selectedShapes.includes(tag));
-    group("造型细分（可多选）", childOptions, selectedShapes, value => {
-      const values = shapeSelection(r) || selectedShapes;
-      const tags = values.includes(value) ? values.filter(tag => tag !== value) : [...values, value];
+    function toggleShape(value){
+      const values = shapeSelection(r)?.map(normalizeShape) || selectedShapes;
+      // Eye size and cheek fullness are exclusive within each group.
+      const parent = shapeParent(value);
+      const exclusive = ["眼睛", "腮帮子"].includes(parent);
+      const tags = values.includes(value) ? values.filter(tag => tag !== value)
+        : [...values.filter(tag => !exclusive || shapeParent(tag) !== parent), value];
       save({ feature: featureDescription(r) + SHAPE_MARKER + JSON.stringify(tags) });
-    });
+    }
+    const childOptions = shapeCats.filter(tag => !["眼睛", "腮帮子"].includes(shapeParent(tag)) &&
+      (shapeParent(tag) === normalizeFeature(r.feature_cat) || selectedShapes.includes(tag)));
+    group("造型细分（可多选）", childOptions, selectedShapes, toggleShape);
+    group("眼睛", shapeCats.filter(tag => shapeParent(tag) === "眼睛"), selectedShapes, toggleShape);
+    group("腮帮子 · 按脸颊鼓起程度", shapeCats.filter(tag => shapeParent(tag) === "腮帮子"), selectedShapes, toggleShape);
     const species = (r.species || "").split(/[、,，]/).map(value => value.trim()).filter(Boolean);
     group("物种（可多选）", [...new Set([...CATS.species, ...species])], species, value =>
       save({ species: (species.includes(value) ? species.filter(item => item !== value) : [...species, value]).join("、") }));
+    const proposal = REVIEW_SUGGESTIONS[r.id];
+    if (proposal && !CASE_TYPES.includes(r.style)) {
+      const review = el("div", "classification-proposal");
+      review.append(el("strong", null, "待你核对的建议"));
+      const tags = el("div", "chips");
+      [proposal.type || "大类待确认", ...proposal.tags].forEach(tag => tags.append(el("span", "proposal-tag", tag)));
+      review.append(tags);
+      if (proposal.type) {
+        const accept = el("button", "btn small", "确认这组建议");
+        accept.type = "button";
+        accept.onclick = () => {
+          if (detailBusy) return;
+          const suggestedParents = new Set(proposal.tags.map(shapeParent));
+          const values = (shapeSelection(r)?.map(normalizeShape) || selectedShapes)
+            .filter(tag => !suggestedParents.has(shapeParent(tag)));
+          const patch = { style: proposal.type };
+          if (proposal.tags.length) patch.feature = featureDescription(r) + SHAPE_MARKER +
+            JSON.stringify([...new Set([...values, ...proposal.tags])]);
+          save(patch);
+        };
+        review.append(accept);
+      }
+      review.append(el("p", "note", "建议依据上次导出图片。请对照当前图片确认，也可直接点上方分类修改。"));
+      controls.append(review);
+    }
     status.id = "detailSaveStatus";
     right.append(controls, status);
     const edit = el("button", "btn ghost small", "编辑文字描述");
@@ -838,7 +902,7 @@ function drawRef(r){
     right.append(actions);
   }
   const dl = el("dl");
-  [["物种", r.species], ["主特征分类", r.feature_cat], ["主特征", featureDescription(r)], ["跨界元素", r.fusion], ["配色", r.colors], ["表情", r.mood], ["借鉴点", r.learn], ["推荐理由", r.note]]
+  [["大类", CASE_TYPES.includes(r.style) ? r.style : ""], ["物种", r.species], ["主特征分类", normalizeFeature(r.feature_cat)], ["主特征", featureDescription(r)], ["跨界元素", r.fusion], ["配色", r.colors], ["表情", r.mood], ["借鉴点", r.learn], ["推荐理由", r.note]]
     .forEach(([key, value]) => { if (value) dl.append(el("dt", null, key), el("dd", null, value)); });
   right.append(dl);
   body.append(im, right);

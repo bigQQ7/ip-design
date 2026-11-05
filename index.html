@@ -6,7 +6,7 @@
 <title>IP造型诊断台</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=ZCOOL+QingKe+HuangYou&family=JetBrains+Mono:wght@500&display=swap">
-<link rel="stylesheet" href="style.css?v=13">
+<link rel="stylesheet" href="style.css?v=15">
 </head>
 <body>
 
@@ -118,6 +118,7 @@
         </div>
         <input type="file" id="baseFile" accept="image/jpeg" multiple hidden>
         <div class="row" style="align-items:center">
+          <button class="btn small" id="reviewTaxonomy" type="button">看图核对分类建议</button>
           <button class="btn ghost small" id="reviewExport" type="button">导出案例图片供复核</button>
           <button class="btn ghost small" id="reviewImport" type="button">导入分类结果</button>
           <input type="file" id="reviewFile" accept=".json,application/json" hidden>
@@ -132,6 +133,7 @@
               <option value="feature">添加造型特点</option>
               <option value="feature_cat">设置主特征</option>
               <option value="species">设置物种</option>
+              <option value="style">设置大类</option>
             </select>
             <select id="batchValue" aria-label="选择分类"></select>
             <button class="btn small" id="batchPreview" type="button">预览改动</button>
@@ -262,6 +264,6 @@
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=5"></script>
-<script src="app.js?v=14"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>
