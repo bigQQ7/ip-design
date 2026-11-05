@@ -305,7 +305,21 @@ function selectFacet(key, value){
   buildFilters();
   renderLib();
 }
+const SHAPE_MARKER = "\n[造型分类]";
+function shapeSelection(r){
+  const at = (r.feature || "").lastIndexOf(SHAPE_MARKER);
+  if (at < 0) return null;
+  try {
+    const tags = JSON.parse(r.feature.slice(at + SHAPE_MARKER.length));
+    return Array.isArray(tags) && tags.every(tag => typeof tag === "string") ? tags : null;
+  } catch { return null; }
+}
+function featureDescription(r){
+  return (r.feature || "").split(SHAPE_MARKER)[0];
+}
 function matchesShape(r, term){
+  const selected = shapeSelection(r);
+  if (selected) return selected.includes(term);
   const pattern = Object.hasOwn(SHAPE_TERMS, term) ? SHAPE_TERMS[term] : null;
   return [r.feature, r.feature_cat, r.fusion].some(value =>
     pattern ? pattern.test(value || "") : (value || "").includes(term));
@@ -439,16 +453,15 @@ function catPicker(root){
     };
     groups[dim] = g; root.append(wrap); g.draw();
   };
-  make("feature", "主特征分类", false); make("style", "风格", false); make("species", "物种", true);
+  make("feature", "主特征分类", false); make("species", "物种", true);
   return {
     set(t){
       groups.feature.sel = new Set(t?.feature_cat ? [t.feature_cat] : []);
-      groups.style.sel = new Set(t?.style ? [t.style] : []);
       groups.species.sel = new Set((t?.species || "").split(/[、,，]/).map(s => s.trim()).filter(Boolean));
       Object.values(groups).forEach(g => g.draw());
     },
     get(){
-      return { feature_cat: [...groups.feature.sel][0] || "", style: [...groups.style.sel][0] || "", species: [...groups.species.sel].join("、") };
+      return { feature_cat: [...groups.feature.sel][0] || "", species: [...groups.species.sel].join("、") };
     }
   };
 }
@@ -506,7 +519,7 @@ $("#batchPreview").onclick = () => {
     id: r.id,
     before: r[field],
     after: field === "feature"
-      ? (matchesShape(r, value) ? r.feature : [r.feature, value].filter(Boolean).join("；"))
+      ? (matchesShape(r, value) ? r.feature : shapeSelection(r) ? featureDescription(r) + SHAPE_MARKER + JSON.stringify([...shapeSelection(r), value]) : [r.feature, value].filter(Boolean).join("；"))
       : value
   })).filter(change => typeof change.after === "string");
   previewReview(changes, field);
@@ -695,35 +708,163 @@ $("#reviewApply").onclick = async () => {
   }
 };
 
+let detailCases = [];
+let detailIndex = -1;
+let detailBusy = false;
+function moveDetail(step){
+  if (detailBusy) return;
+  const next = detailIndex + step;
+  if (next < 0 || next >= detailCases.length) return;
+  const r = refs.find(item => item.id === detailCases[next]);
+  if (r) { detailIndex = next; drawRef(r); }
+}
 function openRef(r){
+  if (detailBusy) return;
+  detailCases = visibleCases.some(item => item.id === r.id)
+    ? visibleCases.map(item => item.id) : refs.map(item => item.id);
+  detailIndex = detailCases.indexOf(r.id);
+  drawRef(r);
+  if (!$("#dlg").open) $("#dlg").showModal();
+}
+function drawRef(r){
   const body = $("#dlgBody"); body.replaceChildren();
   const im = imgEl(r.image_path, r.name);
-  const right = el("div"); right.append(el("h2", "h-first", r.name));
-  const dl = el("dl");
-  [["物种", r.species], ["主特征分类", r.feature_cat], ["主特征", r.feature], ["跨界元素", r.fusion], ["配色", r.colors], ["风格", r.style], ["表情", r.mood], ["借鉴点", r.learn], ["推荐理由", r.note]]
-    .forEach(([k, v]) => { if (v) dl.append(el("dt", null, k), el("dd", null, v)); });
-  right.append(dl);
-  if (isAdmin && r.id) {
-    const acts = el("div", "row");
-    const ed = el("button", "btn ghost small", uncategorized(r) ? "分类" : "编辑分类"); ed.type = "button";
-    ed.onclick = () => { $("#dlg").close(); openTagForm({ title: "分类与标签", tags: r, path: r.image_path, onSave: async t => {
-      const { error } = await sb.from("refs").update(t).eq("id", r.id); if (error) throw error; await loadRefs(); renderLib(); } }); };
-    const rm = el("button", "btn ghost small", "从案例库移除"); rm.type = "button";
-    rm.onclick = async () => {
-      if (!rm.dataset.armed) { rm.dataset.armed = "1"; rm.textContent = "再点一次确认移除"; rm.classList.add("danger"); return; }
-      rm.disabled = true;
-      const { error } = await sb.from("refs").delete().eq("id", r.id);
-      if (error) { rm.textContent = "移除没有成功"; return; }
-      if (r.image_path.startsWith("refs/")) await sb.storage.from("images").remove([r.image_path]);
-      $("#dlg").close(); await loadRefs(); renderLib();
+  const right = el("div");
+  const navigation = el("div", "detail-nav");
+  const prev = el("button", "btn ghost small", "← 上一张");
+  const next = el("button", "btn ghost small", "下一张 →");
+  prev.type = next.type = "button";
+  prev.disabled = detailIndex <= 0;
+  next.disabled = detailIndex < 0 || detailIndex >= detailCases.length - 1;
+  prev.onclick = () => moveDetail(-1);
+  next.onclick = () => moveDetail(1);
+  navigation.append(prev, el("span", "note", detailIndex < 0 ? "" : (detailIndex + 1) + " / " + detailCases.length), next);
+  right.append(navigation, el("h2", "h-first", r.name));
+  if (isAdmin && r.id && refs.some(item => item.id === r.id)) {
+    const status = el("p", "note", "点击分类自动保存。左右滑动图片或按方向键切换。");
+    status.setAttribute("role", "status");
+    const controls = el("fieldset", "quick-categories");
+    const save = async patch => {
+      if (detailBusy) return;
+      detailBusy = true;
+      controls.disabled = prev.disabled = next.disabled = $("#dlgClose").disabled = true;
+      status.textContent = "正在保存…";
+      try {
+        let request = sb.from("refs").update(patch).eq("id", r.id);
+        for (const key of Object.keys(patch)) {
+          request = r[key] == null ? request.is(key, null) : request.eq(key, r[key]);
+        }
+        const { data, error } = await request.select("id").maybeSingle();
+        if (error || !data) throw new Error();
+        Object.assign(r, patch);
+        renderLib();
+        drawRef(r);
+        $("#detailSaveStatus").textContent = "已保存";
+      } catch {
+        status.textContent = "保存失败，分类未改变。若其他人也在编辑，请关闭后刷新再试。";
+      } finally {
+        detailBusy = false;
+        controls.disabled = $("#dlgClose").disabled = false;
+        prev.disabled = detailIndex <= 0;
+        next.disabled = detailIndex < 0 || detailIndex >= detailCases.length - 1;
+      }
     };
-    acts.append(ed, rm); right.append(acts);
+    function group(label, options, selected, onChoose){
+      const wrap = el("div", "field");
+      wrap.append(el("span", null, label));
+      const chips = el("div", "chips");
+      options.forEach(value => {
+        const button = el("button", "chip", value);
+        button.type = "button";
+        button.setAttribute("aria-pressed", String(selected.includes(value)));
+        button.onclick = () => onChoose(value);
+        chips.append(button);
+      });
+      wrap.append(chips); controls.append(wrap);
+    }
+    group("主特征", [...new Set([...CATS.feature, r.feature_cat].filter(Boolean))], [r.feature_cat], value =>
+      save({ feature_cat: r.feature_cat === value ? "" : value }));
+    const selectedShapes = shapeCats.filter(tag => matchesShape(r, tag));
+    const childOptions = shapeCats.filter(tag => shapeParent(tag) === r.feature_cat || selectedShapes.includes(tag));
+    group("造型细分（可多选）", childOptions, selectedShapes, value => {
+      const values = shapeSelection(r) || selectedShapes;
+      const tags = values.includes(value) ? values.filter(tag => tag !== value) : [...values, value];
+      save({ feature: featureDescription(r) + SHAPE_MARKER + JSON.stringify(tags) });
+    });
+    const species = (r.species || "").split(/[、,，]/).map(value => value.trim()).filter(Boolean);
+    group("物种（可多选）", [...new Set([...CATS.species, ...species])], species, value =>
+      save({ species: (species.includes(value) ? species.filter(item => item !== value) : [...species, value]).join("、") }));
+    status.id = "detailSaveStatus";
+    right.append(controls, status);
+    const edit = el("button", "btn ghost small", "编辑文字描述");
+    edit.type = "button";
+    edit.onclick = () => {
+      if (detailBusy) return;
+      $("#dlg").close();
+      openTagForm({ title: "分类与描述", tags: r, path: r.image_path, onSave: async tags => {
+        const { error } = await sb.from("refs").update(tags).eq("id", r.id);
+        if (error) throw error;
+        await loadRefs(); renderLib();
+      } });
+    };
+    const remove = el("button", "btn ghost small", "从案例库移除");
+    remove.type = "button";
+    remove.onclick = async () => {
+      if (detailBusy) return;
+      if (!remove.dataset.armed) {
+        remove.dataset.armed = "1";
+        remove.textContent = "再点一次确认移除";
+        return;
+      }
+      detailBusy = true;
+      remove.disabled = controls.disabled = $("#dlgClose").disabled = true;
+      try {
+        const { error } = await sb.from("refs").delete().eq("id", r.id);
+        if (error) throw error;
+        if (r.image_path.startsWith("refs/")) await sb.storage.from("images").remove([r.image_path]);
+        $("#dlg").close();
+        await loadRefs(); renderLib();
+      } catch {
+        status.textContent = "移除失败，请刷新页面确认后再试。";
+      } finally {
+        detailBusy = false;
+        remove.disabled = controls.disabled = $("#dlgClose").disabled = false;
+      }
+    };
+    const actions = el("div", "row");
+    actions.append(edit, remove);
+    right.append(actions);
   }
+  const dl = el("dl");
+  [["物种", r.species], ["主特征分类", r.feature_cat], ["主特征", featureDescription(r)], ["跨界元素", r.fusion], ["配色", r.colors], ["表情", r.mood], ["借鉴点", r.learn], ["推荐理由", r.note]]
+    .forEach(([key, value]) => { if (value) dl.append(el("dt", null, key), el("dd", null, value)); });
+  right.append(dl);
   body.append(im, right);
+  let start = null;
+  im.style.touchAction = "pan-y";
+  im.addEventListener("touchstart", event => {
+    const touch = event.touches.length === 1 ? event.touches[0] : null;
+    start = touch ? { x: touch.clientX, y: touch.clientY } : null;
+  }, { passive: true });
+  im.addEventListener("touchend", event => {
+    if (!start) return;
+    const touch = event.changedTouches[0];
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    start = null;
+    if (Math.abs(dx) > 65 && Math.abs(dx) > Math.abs(dy) * 1.5) moveDetail(dx < 0 ? 1 : -1);
+  }, { passive: true });
   hydrate(body);
-  $("#dlg").showModal();
 }
-$("#dlgClose").onclick = () => $("#dlg").close();
+$("#dlgClose").onclick = () => { if (!detailBusy) $("#dlg").close(); };
+$("#dlg").addEventListener("cancel", event => { if (detailBusy) event.preventDefault(); });
+$("#dlg").addEventListener("keydown", event => {
+  if (event.target.matches("input,textarea,select")) return;
+  if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+    event.preventDefault();
+    moveDetail(event.key === "ArrowLeft" ? -1 : 1);
+  }
+});
 
 /* 老师批量上传 */
 $("#bulkOpen").onclick = () => $("#bulkFile").click();
@@ -787,12 +928,14 @@ $("#baseFile").onchange = async () => {
 
 /* ---------------- 分类表单 ---------------- */
 const TAG_KEYS = ["name", "feature", "fusion", "colors", "mood", "learn"];
+let tagShapeSelection = null;
 let tagPicker = null;
 let tagSave = null;
 function openTagForm({ title, tags, path, onSave, saveLabel }){
   $("#tagTitle").textContent = title;
   const p = $("#tagPreview"); p.replaceChildren(); if (path) { p.append(imgEl(path)); hydrate(p); }
-  TAG_KEYS.forEach(k => $("#a-" + k).value = tags?.[k] || "");
+  TAG_KEYS.forEach(k => $("#a-" + k).value = k === "feature" ? featureDescription(tags || {}) : tags?.[k] || "");
+  tagShapeSelection = tags ? shapeSelection(tags) : null;
   tagPicker = catPicker($("#tagCats")); tagPicker.set(tags || {});
   showErr($("#tagErr"), ""); $("#tagSave").disabled = false; $("#tagSave").textContent = saveLabel || "保存";
   tagSave = onSave; $("#tagDlg").showModal();
@@ -801,6 +944,7 @@ $("#tagCancel").onclick = () => $("#tagDlg").close();
 $("#tagForm").onsubmit = async e => {
   e.preventDefault();
   const t = {}; TAG_KEYS.forEach(k => t[k] = $("#a-" + k).value.trim());
+  if (tagShapeSelection) t.feature += SHAPE_MARKER + JSON.stringify(tagShapeSelection);
   Object.assign(t, tagPicker.get());
   if (!t.name) return showErr($("#tagErr"), "请填写名字。");
   $("#tagSave").disabled = true;
