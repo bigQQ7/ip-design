@@ -421,7 +421,56 @@ function applyRatio(card, r){
   const ph = card.querySelector(".ph"); if (ph) ph.style.aspectRatio = String(c);
   const im = card.querySelector("img"); if (im) im.style.objectPosition = r < 0.6 ? "top center" : "center";
 }
-function refCard(r, why){
+const selectedCases = new Set();
+let batchMode = false;
+let visibleCases = [];
+function updateBatchCount(){
+  $("#batchCount").textContent = "已选 " + selectedCases.size + " 张";
+  $("#batchPreview").disabled = !selectedCases.size || $("#batchValue").selectedIndex < 0;
+}
+function loadBatchValues(){
+  const field = $("#batchField").value;
+  const options = field === "feature" ? shapeCats : ["", ...CATS[field === "feature_cat" ? "feature" : "species"]];
+  $("#batchValue").replaceChildren(...options.map(value => {
+    const option = el("option", null, value || "清除分类");
+    option.value = value;
+    return option;
+  }));
+  updateBatchCount();
+}
+$("#editBatch").onclick = () => {
+  if (!isAdmin) return;
+  batchMode = !batchMode;
+  selectedCases.clear();
+  $("#editBatch").textContent = batchMode ? "退出批量修改" : "批量修改分类";
+  $("#editBatch").setAttribute("aria-pressed", String(batchMode));
+  $("#batchControls").hidden = !batchMode;
+  if (batchMode) loadBatchValues();
+  renderLib();
+};
+$("#batchField").onchange = loadBatchValues;
+$("#batchAll").onclick = () => {
+  if (!isAdmin || !batchMode) return;
+  visibleCases.forEach(r => selectedCases.add(r.id));
+  renderLib();
+};
+$("#batchClear").onclick = () => { selectedCases.clear(); renderLib(); };
+$("#batchPreview").onclick = () => {
+  if (!isAdmin || !batchMode) return;
+  const field = $("#batchField").value;
+  const value = $("#batchValue").value;
+  if (field === "feature" && !shapeCats.includes(value)) return;
+  const changes = refs.filter(r => selectedCases.has(r.id)).map(r => ({
+    id: r.id,
+    before: r[field],
+    after: field === "feature"
+      ? (matchesShape(r, value) ? r.feature : [r.feature, value].filter(Boolean).join("；"))
+      : value
+  })).filter(change => typeof change.after === "string");
+  previewReview(changes, field);
+};
+
+function refCard(r, why, inLibrary = false){
   const b = el("button", "card"); b.type = "button";
   const ph = el("div", "ph"); ph.append(imgEl(r.image_path, r.name));
   b.append(ph);
@@ -437,6 +486,32 @@ function refCard(r, why){
   }
   if (isAdmin && uncategorized(r)) ph.append(el("span", "unc-badge", "未分类"));
   if (why) { const bd = el("div", "bd"); bd.append(el("div", "why", why)); b.append(bd); }
+  if (inLibrary) {
+    const shapes = shapeCats.filter(tag => matchesShape(r, tag));
+    const labels = [...new Set([...shapes, r.feature_cat, ...(r.highlights || []), ...(r.species || "").split("、")].filter(Boolean))];
+    if (labels.length) {
+      const tags = el("div", "preview-tags");
+      labels.forEach(label => tags.append(el("span", null, label)));
+      ph.append(tags);
+    }
+    if (isAdmin && batchMode) {
+      const mark = el("span", "batch-mark");
+      function showSelection(){
+        const selected = selectedCases.has(r.id);
+        b.setAttribute("aria-pressed", String(selected));
+        mark.textContent = selected ? "✓ 已选" : "○ 选择";
+      }
+      ph.append(mark);
+      showSelection();
+      b.onclick = () => {
+        if (selectedCases.has(r.id)) selectedCases.delete(r.id);
+        else selectedCases.add(r.id);
+        showSelection();
+        updateBatchCount();
+      };
+      return b;
+    }
+  }
   b.onclick = () => openRef(r);
   return b;
 }
@@ -448,9 +523,11 @@ function renderLib(){
     return FACETS.every(F => !active[F.key] || F.match(r, active[F.key]));
   });
   $("#libCount").textContent = list.length + " / " + refs.length + " 个案例";
+  visibleCases = list;
+  updateBatchCount();
   const g = $("#libCards"); g.replaceChildren();
   if (!list.length) { g.append(el("div", "empty", refs.length ? "没有符合条件的案例，试试减少筛选条件。" : "案例库还是空的。")); return; }
-  list.forEach(r => g.append(refCard(r)));
+  list.forEach(r => g.append(refCard(r, null, true)));
   hydrate(g);
 }
 /* ---------------- 管理员批量复核 ---------------- */
@@ -507,36 +584,44 @@ reviewFile.onchange = async () => {
   try {
     const payload = JSON.parse(await file.text());
     if (payload.version !== 1 || !Array.isArray(payload.changes) || !payload.changes.length) throw new Error();
-    const byId = new Map(refs.map(r => [r.id, r]));
     const seen = new Set();
-    const preview = $("#reviewChanges");
-    preview.replaceChildren();
-    reviewChanges = [];
     for (const change of payload.changes) {
       if (!change || typeof change.id !== "string" || seen.has(change.id) ||
           !(change.before === null || typeof change.before === "string") ||
           typeof change.after !== "string") throw new Error();
       seen.add(change.id);
-      const r = byId.get(change.id);
-      const label = r?.name || change.id;
-      const after = change.after.trim();
-      if (!r || r.feature !== change.before) {
-        preview.append(el("li", null, label + "：案例不存在或描述已更新，跳过。"));
-      } else if (r.feature !== after) {
-        const row = el("li", null, label);
-        row.append(el("div", null, "原描述：" + (r.feature || "（空）")),
-          el("div", null, "新描述：" + (after || "（空）")));
-        preview.append(row);
-        reviewChanges.push({ ...change, after, row });
-      }
     }
-    $("#reviewApply").disabled = !reviewChanges.length;
-    $("#reviewImportStatus").textContent = reviewChanges.length + " 条可以保存。";
-    reviewDialog.showModal();
+    previewReview(payload.changes, "feature");
   } catch {
     reviewStatus.textContent = "无法读取分类结果，请选择有效的分类 JSON 文件。";
   }
 };
+
+function previewReview(changes, field){
+  const labels = { feature: "主特征（具体描述）", feature_cat: "主特征分类", species: "物种" };
+  const byId = new Map(refs.map(r => [r.id, r]));
+  const preview = $("#reviewChanges");
+  preview.replaceChildren();
+  reviewChanges = [];
+  for (const change of changes) {
+    const r = byId.get(change.id);
+    const label = r?.name || change.id;
+    const after = change.after.trim();
+    if (!r || r[field] !== change.before) {
+      preview.append(el("li", null, label + "：案例不存在或描述已更新，跳过。"));
+    } else if (r[field] !== after) {
+      const row = el("li", null, label);
+      row.append(el("div", null, "原描述：" + (r[field] || "（空）")),
+        el("div", null, "新描述：" + (after || "（空）")));
+      preview.append(row);
+      reviewChanges.push({ ...change, after, row, field });
+    }
+  }
+  $("#reviewApply").disabled = !reviewChanges.length;
+  $("#reviewImportStatus").textContent = reviewChanges.length + " 条可以保存。";
+  $("#reviewField").textContent = "确认后更新：" + labels[field];
+  reviewDialog.showModal();
+}
 
 $("#reviewClose").onclick = () => reviewDialog.close();
 reviewDialog.addEventListener("cancel", e => {
@@ -549,8 +634,8 @@ $("#reviewApply").onclick = async () => {
   try {
     for (const change of reviewChanges) {
       try {
-        const update = sb.from("refs").update({ feature: change.after }).eq("id", change.id);
-        const guarded = change.before === null ? update.is("feature", null) : update.eq("feature", change.before);
+        const update = sb.from("refs").update({ [change.field]: change.after }).eq("id", change.id);
+        const guarded = change.before === null ? update.is(change.field, null) : update.eq(change.field, change.before);
         const { data, error } = await guarded.select("id").maybeSingle();
         if (error || !data) throw new Error();
         change.row.append(el("div", null, "已保存"));

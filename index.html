@@ -6,7 +6,7 @@
 <title>IP造型诊断台</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=ZCOOL+QingKe+HuangYou&family=JetBrains+Mono:wght@500&display=swap">
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
 
@@ -122,6 +122,21 @@
           <button class="btn ghost small" id="reviewImport" type="button">导入分类结果</button>
           <input type="file" id="reviewFile" accept=".json,application/json" hidden>
         </div>
+        <div class="row" style="align-items:center">
+          <button class="btn ghost small" id="editBatch" type="button" aria-pressed="false">批量修改分类</button>
+          <div class="batch-controls" id="batchControls" hidden>
+            <span id="batchCount" role="status"></span>
+            <button class="btn ghost small" id="batchAll" type="button">选中当前结果</button>
+            <button class="btn ghost small" id="batchClear" type="button">清空选择</button>
+            <select id="batchField" aria-label="修改项目">
+              <option value="feature">添加造型特点</option>
+              <option value="feature_cat">设置主特征</option>
+              <option value="species">设置物种</option>
+            </select>
+            <select id="batchValue" aria-label="选择分类"></select>
+            <button class="btn small" id="batchPreview" type="button">预览改动</button>
+          </div>
+        </div>
         <p class="note" id="reviewStatus" role="status"></p>
         <ul class="prog" id="bulkProg"></ul>
       </div>
@@ -234,7 +249,7 @@
 <dialog id="reviewImportDlg">
   <div class="tagform">
     <h2 class="h-first">核对分类改动</h2>
-    <p class="note">确认后只更新列出的案例的「主特征（具体描述）」。</p>
+    <p class="note" id="reviewField"></p>
     <ul id="reviewChanges"></ul>
     <p class="note" id="reviewImportStatus" role="status"></p>
     <div class="row end">
@@ -247,6 +262,6 @@
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=5"></script>
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>

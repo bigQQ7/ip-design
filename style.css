@@ -158,3 +158,11 @@ dialog::backdrop{background:rgba(10,12,20,.55)}
 #libCards .card.tile .ph img{object-fit:cover}
 @media (max-width:860px){#libCards{--row:170px}}
 @media (max-width:520px){#libCards{--row:120px;gap:8px}}
+
+.batch-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.batch-controls select{font:inherit;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px}
+.preview-tags{position:absolute;inset:auto 0 0;display:flex;flex-wrap:wrap;gap:4px;padding:6px;background:linear-gradient(transparent,rgba(0,0,0,.7))}
+.preview-tags span,.batch-mark{background:var(--surface);color:var(--fg);border-radius:6px;padding:2px 6px;font-size:12px;line-height:1.35}
+.batch-mark{position:absolute;top:6px;right:6px;font-weight:700}
+.card[aria-pressed="true"]{outline:2px solid var(--accent);outline-offset:1px}
+.card[aria-pressed="true"] .batch-mark{background:var(--accent);color:var(--accent-ink)}
