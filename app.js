@@ -268,7 +268,7 @@ async function loadRefs(){
   const { data, error } = await sb.from("refs").select("*").order("is_base", { ascending: false }).order("created_at", { ascending: true });
   if (!error) refs = data || [];
 }
-const uncategorized = r => !r.feature_cat && !(r.highlights || []).length;
+const uncategorized = r => !r.feature_cat && !r.feature && !r.species;
 const FEAT_KW = { "帽子/头饰": ["帽", "头饰", "头套"], "头顶元素": ["头顶"] };
 const SHAPE_TERMS = {
   "大耳朵": /大(?:圆|尖|垂)?耳/,
@@ -311,7 +311,6 @@ function matchesShape(r, term){
     pattern ? pattern.test(value || "") : (value || "").includes(term));
 }
 const FACETS = [
-  { key: "hl", dim: "hl", label: "亮点", opts: () => CATS.hl, match: (r, v) => (r.highlights || []).includes(v) },
   { key: "feature", dim: "feature", label: "主特征", opts: () => CATS.feature, match: matchesFeature },
   { key: "shape", dim: "shape", label: "造型特点", opts: () => shapeCats.filter(tag => shapeParent(tag) === active.feature), match: matchesShape },
   { key: "species", dim: "species", label: "物种", opts: () => CATS.species, match: (r, v) => (r.species || "").includes(v) },
@@ -440,17 +439,16 @@ function catPicker(root){
     };
     groups[dim] = g; root.append(wrap); g.draw();
   };
-  make("hl", "亮点", true); make("feature", "主特征分类", false); make("style", "风格", false); make("species", "物种", true);
+  make("feature", "主特征分类", false); make("style", "风格", false); make("species", "物种", true);
   return {
     set(t){
-      groups.hl.sel = new Set(t?.highlights || []);
       groups.feature.sel = new Set(t?.feature_cat ? [t.feature_cat] : []);
       groups.style.sel = new Set(t?.style ? [t.style] : []);
       groups.species.sel = new Set((t?.species || "").split(/[、,，]/).map(s => s.trim()).filter(Boolean));
       Object.values(groups).forEach(g => g.draw());
     },
     get(){
-      return { highlights: [...groups.hl.sel], feature_cat: [...groups.feature.sel][0] || "", style: [...groups.style.sel][0] || "", species: [...groups.species.sel].join("、") };
+      return { feature_cat: [...groups.feature.sel][0] || "", style: [...groups.style.sel][0] || "", species: [...groups.species.sel].join("、") };
     }
   };
 }
@@ -532,7 +530,7 @@ function refCard(r, why, inLibrary = false){
   if (why) { const bd = el("div", "bd"); bd.append(el("div", "why", why)); b.append(bd); }
   if (inLibrary) {
     const shapes = shapeCats.filter(tag => matchesShape(r, tag));
-    const labels = [...new Set([...shapes, r.feature_cat, ...(r.highlights || []), ...(r.species || "").split("、")].filter(Boolean))];
+    const labels = [...new Set([...shapes, r.feature_cat, ...(r.species || "").split("、")].filter(Boolean))];
     if (labels.length) {
       const tags = el("div", "preview-tags");
       labels.forEach(label => tags.append(el("span", null, label)));
@@ -562,7 +560,7 @@ function refCard(r, why, inLibrary = false){
 function renderLib(){
   const q = $("#q").value.trim();
   const list = refs.filter(r => {
-    const hay = [r.name, r.species, r.fusion, r.feature, r.feature_cat, r.colors, r.style, r.mood, r.learn, (r.highlights || []).join(" ")].join(" ");
+    const hay = [r.name, r.species, r.fusion, r.feature, r.feature_cat, r.colors, r.style, r.mood, r.learn].join(" ");
     if (q && !q.split(/\s+/).every(w => hay.includes(w) || (Object.hasOwn(SHAPE_TERMS, w) && matchesShape(r, w)))) return false;
     return FACETS.every(F => !active[F.key] || F.match(r, active[F.key]));
   });
@@ -702,7 +700,7 @@ function openRef(r){
   const im = imgEl(r.image_path, r.name);
   const right = el("div"); right.append(el("h2", "h-first", r.name));
   const dl = el("dl");
-  [["物种", r.species], ["主特征分类", r.feature_cat], ["主特征", r.feature], ["跨界元素", r.fusion], ["配色", r.colors], ["风格", r.style], ["表情", r.mood], ["亮点", (r.highlights || []).join("、")], ["借鉴点", r.learn], ["推荐理由", r.note]]
+  [["物种", r.species], ["主特征分类", r.feature_cat], ["主特征", r.feature], ["跨界元素", r.fusion], ["配色", r.colors], ["风格", r.style], ["表情", r.mood], ["借鉴点", r.learn], ["推荐理由", r.note]]
     .forEach(([k, v]) => { if (v) dl.append(el("dt", null, k), el("dd", null, v)); });
   right.append(dl);
   if (isAdmin && r.id) {
@@ -757,7 +755,7 @@ $("#upForm").onsubmit = async e => {
   const tags = upPicker.get();
   const files = upFiles; upFiles = []; $("#upDlg").close();
   const prog = $("#bulkProg");
-  const label = [tags.feature_cat, tags.species, tags.style, ...tags.highlights].filter(Boolean).join(" · ");
+  const label = [tags.feature_cat, tags.species, tags.style].filter(Boolean).join(" · ");
   for (const f of files) {
     const nm = (f.name || "粘贴的图片").replace(/\.[^.]+$/, "");
     const li = el("li", null, nm + "：上传中…"); prog.prepend(li);
