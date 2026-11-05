@@ -279,6 +279,32 @@ const SHAPE_TERMS = {
 // Store shape options in the existing feature dimension, which has admin-only writes.
 const SHAPE_PREFIX = "造型特点：";
 let shapeCats = Object.keys(SHAPE_TERMS);
+const SHAPE_PARENT_PREFIX = "造型归属：";
+const shapeParents = new Map();
+function shapeParent(name){
+  if (shapeParents.has(name)) return shapeParents.get(name);
+  if (name.includes("耳")) return "耳朵";
+  if (/脸|头型/.test(name)) return "头型";
+  if (/嘴|口|喙/.test(name)) return "嘴";
+  if (/眼|眉|表情/.test(name)) return "表情";
+  if (/尾/.test(name)) return "尾巴";
+  if (/角/.test(name)) return "角";
+  if (/发/.test(name)) return "发型";
+  if (/帽|头饰/.test(name)) return "帽子/头饰";
+  if (/体|胖|瘦/.test(name)) return "体型";
+  return null;
+}
+function matchesFeature(r, parent){
+  return r.feature_cat === parent ||
+    (FEAT_KW[parent] || [parent]).some(k => ((r.feature || "") + (r.fusion || "")).includes(k)) ||
+    shapeCats.some(tag => shapeParent(tag) === parent && matchesShape(r, tag));
+}
+function selectFacet(key, value){
+  active[key] = value;
+  if (key === "feature") active.shape = null;
+  buildFilters();
+  renderLib();
+}
 function matchesShape(r, term){
   const pattern = Object.hasOwn(SHAPE_TERMS, term) ? SHAPE_TERMS[term] : null;
   return [r.feature, r.feature_cat, r.fusion].some(value =>
@@ -286,8 +312,8 @@ function matchesShape(r, term){
 }
 const FACETS = [
   { key: "hl", dim: "hl", label: "亮点", opts: () => CATS.hl, match: (r, v) => (r.highlights || []).includes(v) },
-  { key: "feature", dim: "feature", label: "主特征", opts: () => CATS.feature, match: (r, v) => r.feature_cat === v || (FEAT_KW[v] || [v]).some(k => ((r.feature || "") + (r.fusion || "")).includes(k)) },
-  { key: "shape", dim: "shape", label: "造型特点", opts: () => shapeCats, match: matchesShape },
+  { key: "feature", dim: "feature", label: "主特征", opts: () => CATS.feature, match: matchesFeature },
+  { key: "shape", dim: "shape", label: "造型特点", opts: () => shapeCats.filter(tag => shapeParent(tag) === active.feature), match: matchesShape },
   { key: "species", dim: "species", label: "物种", opts: () => CATS.species, match: (r, v) => (r.species || "").includes(v) },
   { key: "src", label: "来源", admin: true, opts: ["教学组原始库", "学生推荐", "老师上传", "未分类"], match: (r, v) => v === "未分类" ? uncategorized(r) : v === "学生推荐" ? !!r.from_user : v === "老师上传" ? (!r.is_base && !r.from_user) : r.is_base }
 ];
@@ -298,8 +324,14 @@ async function loadCats(){
   if (error || !data || !data.length) return;
   const c = { hl: [], feature: [], style: [], species: [] };
   const storedShapes = new Map();
+  shapeParents.clear();
   data.forEach(r => {
-    if (r.dim === "feature" && r.name.startsWith(SHAPE_PREFIX)) {
+    if (r.dim === "feature" && r.name.startsWith(SHAPE_PARENT_PREFIX)) {
+      try {
+        const [name, parent] = JSON.parse(r.name.slice(SHAPE_PARENT_PREFIX.length));
+        if (typeof name === "string" && typeof parent === "string") shapeParents.set(name, parent);
+      } catch {}
+    } else if (r.dim === "feature" && r.name.startsWith(SHAPE_PREFIX)) {
       storedShapes.set(r.name.slice(SHAPE_PREFIX.length), r.sort);
     } else if (c[r.dim]) {
       c[r.dim].push(r.name);
@@ -310,18 +342,27 @@ async function loadCats(){
   CATS = c;
 }
 async function addCat(dim){
+  const parent = dim === "shape" ? active.feature : null;
+  if (dim === "shape" && !parent) return null;
   const name = (prompt("新建「" + DIMS[dim] + "」分类，输入名称：") || "").trim();
   if (!name) return null;
   const options = dim === "shape" ? shapeCats : CATS[dim];
-  if (dim === "feature" && name.startsWith(SHAPE_PREFIX)) {
+  if (dim === "feature" && (name.startsWith(SHAPE_PREFIX) || name.startsWith(SHAPE_PARENT_PREFIX))) {
     alert("请在「造型特点」一栏新增这个分类。");
     return null;
   }
-  if (options.includes(name)) return name;
+  if (options.includes(name)) {
+    if (dim === "shape" && shapeParent(name) !== parent) alert("这个子分类已属于「" + (shapeParent(name) || "未分组") + "」。请使用不同名称。");
+    return name;
+  }
   const { error } = dim === "shape"
-    ? await sb.from("categories").upsert({ dim: "feature", name: SHAPE_PREFIX + name, sort: options.length }, { onConflict: "dim,name" })
+    ? await sb.from("categories").upsert([
+        { dim: "feature", name: SHAPE_PREFIX + name, sort: options.length },
+        { dim: "feature", name: SHAPE_PARENT_PREFIX + JSON.stringify([name, parent]), sort: options.length }
+      ], { onConflict: "dim,name" })
     : await sb.from("categories").insert({ dim, name, sort: options.length });
   if (error) { alert("添加没有成功，请再试一次。"); return null; }
+  if (dim === "shape") shapeParents.set(name, parent);
   options.push(name); buildFilters();
   return name;
 }
@@ -338,11 +379,12 @@ async function delCat(dim, name){
 }
 function buildFilters(){
   const f = $("#filters"); f.replaceChildren();
-  FACETS.filter(F => !F.admin || isAdmin).forEach(F => {
-    const row = el("div", "chips"); row.append(el("span", "lbl", F.label));
+  FACETS.filter(F => (!F.admin || isAdmin) && (F.key !== "shape" || active.feature)).forEach(F => {
+    const row = el("div", F.key === "shape" ? "chips subfilters" : "chips");
+    row.append(el("span", "lbl", F.key === "shape" ? active.feature + "细分" : F.label));
     const all = el("button", "chip", "全部"); all.type = "button";
     all.setAttribute("aria-pressed", String(!active[F.key]));
-    all.onclick = () => { active[F.key] = null; buildFilters(); renderLib(); };
+    all.onclick = () => selectFacet(F.key, null);
     row.append(all);
     const opts = typeof F.opts === "function" ? F.opts() : F.opts;
     opts.forEach(o => {
@@ -352,14 +394,16 @@ function buildFilters(){
         if (manageCats && F.dim) {
           if (!c.dataset.armed) { c.dataset.armed = "1"; c.textContent = "删除「" + o + "」？再点一次"; c.classList.add("chip-danger"); return; }
           if (!await delCat(F.dim, o)) return;
-          if (active[F.key] === o) active[F.key] = null; buildFilters(); renderLib(); return;
+          if (active[F.key] === o) selectFacet(F.key, null);
+          else { buildFilters(); renderLib(); }
+          return;
         }
-        active[F.key] = active[F.key] === o ? null : o; buildFilters(); renderLib();
+        selectFacet(F.key, active[F.key] === o ? null : o);
       };
       row.append(c);
     });
     if (isAdmin && F.dim) {
-      const add = el("button", "chip chip-add", "+ 新分类"); add.type = "button";
+      const add = el("button", "chip chip-add", F.key === "shape" ? "+ 新子分类" : "+ 新分类"); add.type = "button";
       add.onclick = () => addCat(F.dim);
       row.append(add);
     }
