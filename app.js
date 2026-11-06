@@ -264,9 +264,27 @@ $("#checkRun").onclick = () => {
 
 /* ---------------- 案例库 ---------------- */
 let refs = [];
-async function loadRefs(){
-  const { data, error } = await sb.from("refs").select("*").order("is_base", { ascending: false }).order("created_at", { ascending: true });
-  if (!error) refs = data || [];
+let refsState = "idle";
+let refsRequest;
+function loadRefs(){
+  if (refsRequest) return refsRequest;
+  refsState = "loading";
+  refsRequest = (async () => {
+    try {
+      const { data, error } = await sb.from("refs").select("*")
+        .order("is_base", { ascending: false }).order("created_at", { ascending: true });
+      if (error) { refsState = "error"; return false; }
+      refs = data || [];
+      refsState = "ready";
+      return true;
+    } catch {
+      refsState = "error";
+      return false;
+    } finally {
+      refsRequest = null;
+    }
+  })();
+  return refsRequest;
 }
 const uncategorized = r => !r.feature_cat && !r.feature && !r.species;
 const FEAT_KW = { "帽子/头饰": ["帽", "头饰", "头套"], "头顶元素": ["头顶"] };
@@ -598,6 +616,23 @@ function refCard(r, why, inLibrary = false){
   return b;
 }
 function renderLib(){
+  const grid = $("#libCards");
+  if (!refs.length && refsState !== "ready") {
+    $("#libCount").textContent = refsState === "error" ? "案例加载失败" : "正在加载案例…";
+    grid.replaceChildren();
+    if (refsState === "error") {
+      const retry = el("button", "btn ghost", "重新加载案例");
+      retry.type = "button";
+      retry.onclick = async () => {
+        const pending = loadRefs();
+        renderLib();
+        await pending;
+        renderLib();
+      };
+      grid.append(retry);
+    }
+    return;
+  }
   const q = $("#q").value.trim();
   const list = refs.filter(r => {
     const hay = [r.name, r.species, r.fusion, r.feature, r.feature_cat, r.colors, r.style, r.mood, r.learn].join(" ");
@@ -743,16 +778,32 @@ function generatedSuggestions(){
 
 $("#generateSuggestions").onclick = async () => {
   if (!isAdmin || !me) return;
+  const status = $("#reviewStatus");
+  const button = $("#generateSuggestions");
+  button.disabled = true;
+  if (refsState !== "ready" || !refs.length) {
+    status.textContent = "正在重新读取案例库…";
+    const loaded = await loadRefs();
+    renderLib();
+    if (!loaded || !refs.length) {
+      status.textContent = loaded ? "当前账号读取到 0 张案例。请确认案例库已加载图片。" : "案例库读取失败，请点「重新加载案例」后再试。";
+      button.disabled = false;
+      return;
+    }
+  }
   const saved = generatedSuggestions();
   const remaining = refs.filter(r => r.image_path && !CASE_TYPES.includes(r.style) &&
     !Object.hasOwn(REVIEW_SUGGESTIONS, r.id) && saved[r.id]?.path !== r.image_path);
   const batch = remaining.slice(0, 10);
-  const status = $("#reviewStatus");
-  if (!batch.length) { status.textContent = "目前没有需要生成建议的新图片。"; return; }
-
-  const button = $("#generateSuggestions");
+  if (!batch.length) {
+    const pending = refs.filter(r => r.image_path && !CASE_TYPES.includes(r.style) &&
+      (Object.hasOwn(REVIEW_SUGGESTIONS, r.id) || saved[r.id]?.path === r.image_path)).length;
+    status.textContent = pending ? pending + " 张已有建议，点「看图核对分类建议」查看。"
+      : "已读取 " + refs.length + " 个案例，目前没有可生成建议的图片。";
+    button.disabled = false;
+    return;
+  }
   const cacheKey = "ip-suggestions:" + me.id;
-  button.disabled = true;
   let completed = 0;
   let failed = 0;
   try {
