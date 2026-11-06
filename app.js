@@ -657,6 +657,67 @@ const reviewDialog = $("#reviewImportDlg");
 const reviewFile = $("#reviewFile");
 let reviewChanges = [];
 
+const replacementInput = $("#replaceImagesFile");
+$("#replaceImages").onclick = () => { if (isAdmin) replacementInput.click(); };
+replacementInput.onchange = async () => {
+  const file = replacementInput.files[0];
+  replacementInput.value = "";
+  if (!isAdmin || !file) return;
+  const button = $("#replaceImages");
+  button.disabled = true;
+  let saved = 0;
+  let skipped = 0;
+  let failed = 0;
+  try {
+    const zip = await JSZip.loadAsync(file);
+    const manifest = zip.file("cases.json");
+    const items = manifest && JSON.parse(await manifest.async("string")).cases;
+    if (!Array.isArray(items) || !items.length || items.length > 100 ||
+        new Set(items.map(item => item?.id)).size !== items.length ||
+        items.some(item => typeof item?.id !== "string" ||
+          !/^[0-9a-f-]{36}$/i.test(item.id) || item.file !== "images/" + item.id + ".png" ||
+          !/^[0-9a-f]{64}$/.test(item.original_sha256) || !zip.file(item.file))) {
+      throw new Error("invalid package");
+    }
+    if (!confirm("按案例编号替换最多 " + items.length + " 张原图？已有分类会保留。")) return;
+    if (!await loadRefs()) throw new Error("load failed");
+    const byId = new Map(refs.map(r => [r.id, r]));
+    for (const item of items) {
+      reviewStatus.textContent = "正在替换 " + (saved + skipped + failed + 1) + " / " + items.length + " 张…";
+      try {
+        const current = byId.get(item.id);
+        if (!current?.image_path) { skipped++; continue; }
+        const original = await sb.storage.from("images").download(current.image_path);
+        if (original.error || !original.data) throw new Error("download failed");
+        const digest = await crypto.subtle.digest("SHA-256", await original.data.arrayBuffer());
+        const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+        if (hash !== item.original_sha256) { skipped++; continue; }
+        const bytes = await zip.file(item.file).async("uint8array");
+        const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+        if (bytes.length > 10 * 1024 * 1024 || !signature.every((byte, index) => bytes[index] === byte)) {
+          throw new Error("invalid PNG");
+        }
+        const path = "refs/" + crypto.randomUUID() + ".png";
+        const { error: uploadError } = await sb.storage.from("images").upload(path, bytes, { contentType: "image/png" });
+        if (uploadError) throw uploadError;
+        const { data, error } = await sb.from("refs").update({ image_path: path })
+          .eq("id", item.id).eq("image_path", current.image_path).select("id").maybeSingle();
+        if (error || !data) throw new Error("update failed");
+        current.image_path = path;
+        saved++;
+      } catch {
+        failed++;
+      }
+    }
+    renderLib();
+    reviewStatus.textContent = "已替换 " + saved + " 张，原图已变更或案例已移除 " + skipped + " 张，失败 " + failed + " 张。";
+  } catch {
+    reviewStatus.textContent = "无法开始替换。请检查案例库是否已加载，并使用网站替换 ZIP。";
+  } finally {
+    button.disabled = false;
+  }
+};
+
 $("#reviewExport").onclick = async () => {
   if (!isAdmin) return;
   const button = $("#reviewExport");
