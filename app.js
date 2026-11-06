@@ -758,7 +758,7 @@ $("#generateSuggestions").onclick = async () => {
   try {
     for (const r of batch) {
       status.textContent = "正在生成第 " + (completed + failed + 1) + " / " + batch.length + " 张的建议…";
-      const { data, error } = await sb.functions.invoke("classify-case", { body: { id: r.id } });
+      const { data, error } = await sb.functions.invoke("hyper-handler", { body: { id: r.id } });
       if (error) {
         const code = error.context?.status;
         if (code === 503 || !code || code === 401 || code === 403) {
