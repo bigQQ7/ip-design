@@ -286,7 +286,7 @@ function loadRefs(){
   })();
   return refsRequest;
 }
-const uncategorized = r => !r.feature_cat && !r.feature && !r.species;
+const uncategorized = r => !CASE_TYPES.includes(r.style) && !r.feature_cat && !r.feature && !r.species;
 const FEAT_KW = { "帽子/头饰": ["帽", "头饰", "头套"], "头顶元素": ["头顶"] };
 const CASE_TYPES = ["可爱", "潮酷", "真人像盲盒"];
 function normalizeFeature(name){
@@ -570,7 +570,7 @@ $("#batchPreview").onclick = () => {
   previewReview(changes, field);
 };
 
-function refCard(r, why, inLibrary = false){
+function refCard(r, why, inLibrary = false, generated = {}){
   const b = el("button", "card"); b.type = "button";
   const ph = el("div", "ph"); ph.append(imgEl(r.image_path, r.name));
   b.append(ph);
@@ -584,7 +584,10 @@ function refCard(r, why, inLibrary = false){
       if (nr && Math.abs((RATIO.get(r.image_path) || 0) - nr) > 0.01) { RATIO.set(r.image_path, nr); saveRatios(); applyRatio(b, nr); }
     });
   }
-  if (isAdmin && uncategorized(r)) ph.append(el("span", "unc-badge", "未分类"));
+  if (isAdmin) {
+    if (inLibrary && pendingProposal(r, generated)) ph.append(el("span", "unc-badge", "建议待核对"));
+    else if (uncategorized(r)) ph.append(el("span", "unc-badge", "未分类"));
+  }
   if (why) { const bd = el("div", "bd"); bd.append(el("div", "why", why)); b.append(bd); }
   if (inLibrary) {
     const shapes = shapeCats.filter(tag => matchesShape(r, tag));
@@ -644,7 +647,8 @@ function renderLib(){
   updateBatchCount();
   const g = $("#libCards"); g.replaceChildren();
   if (!list.length) { g.append(el("div", "empty", refs.length ? "没有符合条件的案例，试试减少筛选条件。" : "案例库还是空的。")); return; }
-  list.forEach(r => g.append(refCard(r, null, true)));
+  const generated = isAdmin ? generatedSuggestions() : {};
+  list.forEach(r => g.append(refCard(r, null, true, generated)));
   hydrate(g);
 }
 /* ---------------- 管理员批量复核 ---------------- */
@@ -776,6 +780,15 @@ function generatedSuggestions(){
   catch { return {}; }
 }
 
+function pendingProposal(r, generated){
+  const cached = generated[r.id];
+  const proposal = REVIEW_SUGGESTIONS[r.id] || (cached?.path === r.image_path ? cached : null);
+  if (!proposal) return null;
+  const needsReview = !CASE_TYPES.includes(r.style) ||
+    (proposal.confirmed && (r.style !== proposal.type || proposal.tags.some(tag => !matchesShape(r, tag))));
+  return needsReview ? proposal : null;
+}
+
 $("#generateSuggestions").onclick = async () => {
   if (!isAdmin || !me) return;
   const status = $("#reviewStatus");
@@ -796,9 +809,8 @@ $("#generateSuggestions").onclick = async () => {
     !Object.hasOwn(REVIEW_SUGGESTIONS, r.id) && saved[r.id]?.path !== r.image_path);
   const batch = remaining.slice(0, 10);
   if (!batch.length) {
-    const pending = refs.filter(r => r.image_path && !CASE_TYPES.includes(r.style) &&
-      (Object.hasOwn(REVIEW_SUGGESTIONS, r.id) || saved[r.id]?.path === r.image_path)).length;
-    status.textContent = pending ? pending + " 张已有建议，点「看图核对分类建议」查看。"
+    const pending = refs.filter(r => r.image_path && pendingProposal(r, saved)).length;
+    status.textContent = pending ? pending + " 张有分类建议待核对。确认保存后，分类才会显示在卡片上。点「看图核对分类建议」开始。"
       : "已读取 " + refs.length + " 个案例，目前没有可生成建议的图片。";
     button.disabled = false;
     return;
@@ -831,15 +843,19 @@ $("#generateSuggestions").onclick = async () => {
     status.textContent = "这批已暂停，已生成 " + completed + " 张。";
   } finally {
     button.disabled = false;
+    renderLib();
   }
 };
 
 $("#reviewTaxonomy").onclick = () => {
   if (!isAdmin) return;
   const generated = generatedSuggestions();
-  const first = visibleCases.find(r => !CASE_TYPES.includes(r.style) && generated[r.id]?.path === r.image_path)
-    || visibleCases.find(r => !CASE_TYPES.includes(r.style)) || visibleCases[0];
-  if (first) openRef(first);
+  const queue = visibleCases.filter(r => r.image_path && pendingProposal(r, generated));
+  if (queue.length) {
+    openRef(queue[0], queue);
+  } else {
+    $("#reviewStatus").textContent = "当前筛选结果中没有待核对建议。";
+  }
 };
 let detailCases = [];
 let detailIndex = -1;
@@ -853,10 +869,9 @@ function moveDetail(step){
   const r = refs.find(item => item.id === detailCases[next]);
   if (r) { detailIndex = next; drawRef(r); }
 }
-function openRef(r){
+function openRef(r, queue){
   if (detailBusy) return;
-  detailCases = visibleCases.some(item => item.id === r.id)
-    ? visibleCases.map(item => item.id) : refs.map(item => item.id);
+  detailCases = (queue || (visibleCases.some(item => item.id === r.id) ? visibleCases : refs)).map(item => item.id);
   detailIndex = detailCases.indexOf(r.id);
   drawRef(r);
   if (!$("#dlg").open) $("#dlg").showModal();
@@ -938,10 +953,9 @@ function drawRef(r){
     const species = (r.species || "").split(/[、,，]/).map(value => value.trim()).filter(Boolean);
     group("物种（可多选）", [...new Set([...CATS.species, ...species])], species, value =>
       save({ species: (species.includes(value) ? species.filter(item => item !== value) : [...species, value]).join("、") }));
-    const generated = generatedSuggestions()[r.id];
-    const proposal = REVIEW_SUGGESTIONS[r.id] || (generated?.path === r.image_path ? generated : null);
-    if (proposal && (!CASE_TYPES.includes(r.style) ||
-        (proposal.confirmed && (r.style !== proposal.type || proposal.tags.some(tag => !matchesShape(r, tag)))))) {
+    const generated = generatedSuggestions();
+    const proposal = pendingProposal(r, generated);
+    if (proposal) {
       const review = el("div", "classification-proposal");
       review.append(el("strong", null, proposal.confirmed ? "已按你的反馈核对" : "待你核对的建议"));
       const tags = el("div", "chips");
@@ -962,7 +976,7 @@ function drawRef(r){
         };
         review.append(accept);
       }
-      review.append(el("p", "note", generated === proposal ? "这是自动生成的建议，请对照图片确认。" : "请对照当前图片确认，也可直接点上方分类修改。"));
+      review.append(el("p", "note", generated[r.id] === proposal ? "这是自动生成的建议，请对照图片确认。" : "请对照当前图片确认，也可直接点上方分类修改。"));
       controls.append(review);
     }
     status.id = "detailSaveStatus";
